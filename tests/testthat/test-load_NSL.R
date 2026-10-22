@@ -214,3 +214,42 @@ test_that("load_NSL reads a data release's verbatim parquet copies the same as t
   expect_equal(from_release, from_files)
   expect_silent(taxonAlign::check_taxonomic_reference(from_release))
 })
+
+test_that("load_NSL reads the verbatim exports in a data release by default", {
+  release <- withr::local_tempdir()
+  arrow::write_parquet(sample_nsl_animals_taxon_raw(), file.path(release, "nsl_animals_taxon.parquet"))
+  arrow::write_parquet(sample_nsl_animals_names_raw(), file.path(release, "nsl_animals_names.parquet"))
+  asked <- NULL
+  local_mocked_bindings(
+    download_data_release_files = function(files, version, ...) {
+      asked <<- list(files = files, version = version)
+      stats::setNames(file.path(release, files), files)
+    },
+    .package = "taxonAlign"
+  )
+  out <- load_NSL("animals", version = "2026-10-07", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_equal(asked$files, c("nsl_animals_taxon.parquet", "nsl_animals_names.parquet"))
+  expect_equal(asked$version, "2026-10-07")
+  expect_equal(out, load_NSL("animals", path = release, cache_dir = withr::local_tempdir(), quiet = TRUE))
+})
+
+test_that("the AFD's usage markers are read as statuses and removed from names", {
+  marked <- c(
+    "Dendrodoris fumata auctt. non Rüppell & Leuckart, 0", "Aulicus episcopalis sensu Smith",
+    "Chelonia depressa (part.)", "Mopsea elegans [pars]", "Hammaticherus indutus auct., ",
+    "Testus alphus"
+  )
+  expect_equal(
+    afd_usage_status(marked, "synonym"),
+    c("misapplied", "misapplied", "pro parte synonym", "pro parte synonym", "misapplied", "synonym")
+  )
+  expect_equal(
+    strip_afd_usage_markers(marked),
+    c("Dendrodoris fumata", "Aulicus episcopalis", "Chelonia depressa", "Mopsea elegans",
+      "Hammaticherus indutus", "Testus alphus")
+  )
+  expect_equal(
+    strip_name_quotes(c("'Ochlerotatus' notoscriptus", "\"Ziba\" flammea", "Allotria d'arci")),
+    c("Ochlerotatus notoscriptus", "Ziba flammea", "Allotria d'arci")
+  )
+})

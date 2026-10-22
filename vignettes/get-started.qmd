@@ -21,8 +21,9 @@ from a dated data release.
 `taxonAlign.dataprep` is for when you need to build a reference yourself. It:
 
 - reshapes particular sources into taxonAlign's format: the Australian National Species List
-  exports (`load_NSL()`), the Australian Faunal Directory's own export (`load_AFD()`) and the
-  Australian Plant Census (`load_APC()`);
+  exports, including the Australian Faunal Directory's (`load_NSL()`), the Australian Plant
+  Census (`load_APC()`), and two worldwide checklists, the World Checklist of Vascular Plants
+  (`load_WCVP()`) and the Catalogue of Life (`load_CoL()`);
 - builds a reference from the GBIF backbone taxonomy, live (`generate_GBIF_taxonomic_reference_list()`)
   or from a [taxadb](https://docs.ropensci.org/taxadb/) snapshot
   (`generate_taxadb_taxonomic_reference_list()`);
@@ -124,32 +125,137 @@ single "fetch below this name" concept the way a live GBIF fetch does. `taxadb` 
 function, so it's a suggested rather than a required dependency: install it with
 `install.packages("taxadb")` if you use it.
 
-## From the National Species List, the AFD and the APC
+## From the National Species List and the APC
 
 `load_NSL()` reshapes one group's National Species List export -- `"animals"` (the Australian Faunal
-Directory's NSL export), `"algae"`, `"bryophytes"`, `"fungi"` or `"lichens"` -- from the folder holding
-its pair of files: the *taxon* file (accepted names and their synonyms, with links between them) and
-the *names* file (every name recorded for the group). This is what builds the released NSL lists; use
-it directly for an export you've downloaded yourself, from the group's NSL export page (e.g.
-`https://fungi.biodiversity.org.au/nsl/services/export/index`):
+Directory's NSL export), `"algae"`, `"bryophytes"`, `"fungi"` or `"lichens"`. Each group is a pair of
+files: the *taxon* file (accepted names and their synonyms, with links between them) and the *names*
+file (every name recorded for the group). By default `load_NSL()` reads the verbatim copies of both
+stored in a taxonAlign data release -- this is exactly how the release's ready-to-use list is built --
+so, like `taxonAlign::load_taxonomic_resources()`, it needs no file of your own, and `version` names the
+release:
+
+```{r}
+#| eval: false
+bryophytes <- load_NSL("bryophytes", version = "2026-10-07")
+```
+
+For an export you've downloaded yourself, from the group's NSL export page (e.g.
+`https://fungi.biodiversity.org.au/nsl/services/export/index`), point `path` at the folder holding its
+two files:
 
 ```{r}
 #| eval: false
 fungi_now <- load_NSL("fungi", path = "my_downloads/fungi_export")
 ```
 
-`load_AFD()` reads the Australian Faunal Directory's own CSV export (the "AFD format"; the NSL-format
-export above is the recommended source for the AFD), and `load_APC()` the Australian Plant Census, via
-`APCalign::load_taxonomic_resources()`:
+`load_APC()` loads the Australian Plant Census, via `APCalign::load_taxonomic_resources()`, which
+downloads and caches APC releases itself:
 
 ```{r}
 #| eval: false
-afd_csv <- load_AFD("my_downloads/afd_export.csv")
 apc <- load_APC()
 ```
 
-`vignettes/AFD-data-processing.qmd` records every transformation `load_AFD()` and `load_NSL()` make to
-the AFD's two export formats, with counts, and how the two compare.
+`vignettes/AFD-data-processing.qmd` records every transformation `load_NSL()` makes to the AFD's NSL
+export, with counts, and how it compared with the AFD's own CSV export format.
+
+## Worldwide checklists: the WCVP and the Catalogue of Life
+
+`load_WCVP()` loads the World Checklist of Vascular Plants (Royal Botanic Gardens, Kew), every vascular
+plant name worldwide (~1.45 million), and `load_CoL()` the Catalogue of Life, a reference to every
+taxon in every kingdom (~5.5 million names), from [ChecklistBank](https://api.checklistbank.org). The first call
+downloads the source (~90MB and ~170MB); both the download and the reshaped table are cached, so every
+later call loads from your computer, offline. Without a version, the first call gets the current WCVP
+or the latest COL release, and later calls keep using that one -- `refresh_cache = TRUE` checks for a
+newer one:
+
+```{r}
+#| eval: false
+wcvp <- load_WCVP()                       # first time: downloads the current version
+wcvp <- load_WCVP()                       # later: the same version, from the cache
+wcvp <- load_WCVP(refresh_cache = TRUE)   # check Kew for a newer version
+```
+
+Both can be pinned, so an alignment can be repeated exactly. The WCVP by version number:
+
+```{r}
+#| eval: false
+wcvp <- load_WCVP(16)
+attr(wcvp, "citation")
+```
+
+The Catalogue of Life by a release's ChecklistBank key (`316595` is COL26.10, `310463` the COL25
+annual release) or alias. The default, `"3LR"`, is the latest release;
+`https://api.checklistbank.org/dataset?releasedFrom=3&origin=release` lists them all:
+
+```{r}
+#| eval: false
+col <- load_CoL(316595)
+attr(col, "doi")
+```
+
+The first load is slow (the COL especially: a ~170MB download and ~5.5 million names to reshape),
+and so is preparing a list that size for matching. If you'll align more than one list, prepare it
+once and reuse it, rather than passing the raw table to each call; restricting it to a country first
+(below) also makes it far smaller:
+
+```{r}
+#| eval: false
+col_resources <- prepare_taxonomic_resources(col)
+lookup_1 <- create_taxonomic_update_lookup(names_1, col_resources)
+lookup_2 <- create_taxonomic_update_lookup(names_2, col_resources)
+```
+
+Kew's and COL's own statuses are kept (`"illegitimate"`, `"ambiguous synonym"`, ...), except that
+COL's `"provisionally accepted"` names become `"accepted"`, since they're the accepted names of their
+taxa. See `?load_WCVP` and `?load_CoL` for exactly how each is reshaped.
+
+## Restricting a worldwide list to a country
+
+A worldwide list matches more names than you may want: an Australian plant list aligned against the
+whole WCVP can fuzzy-match a misspelt name to a species that only grows in South America.
+`filter_to_country()` keeps only the taxa GBIF has occurrence records of in one or more countries:
+
+```{r}
+#| eval: false
+# first time: downloads the WCVP from Kew, and the names GBIF has records of in Australia
+wcvp_au <- load_WCVP() |> filter_to_country("AU")
+
+lookup <- create_taxonomic_update_lookup(my_plant_names, wcvp_au)
+```
+
+The two taxonomies don't have to agree. Each name GBIF's Australian records are identified to is
+matched to the WCVP's names, accepted or synonym; either way, the WCVP's *accepted* name is kept,
+together with all of its synonyms, so an old name in your list still updates. GBIF's Australian
+records, for example, include *Polypompholyx multifida*, which the WCVP treats as a synonym of
+*Utricularia multifida*: so *Utricularia multifida* is kept, with *Polypompholyx multifida* and every
+other synonym of it. Of the 52,330 species-level names in GBIF's Australian vascular plant records
+(October 2026), 50,653 matched a WCVP name; the rest are mostly spelling variants and informal names. By default every subspecies and
+variety of a kept species is kept too (`whole_species = TRUE`). Genera of the kept species stay, so a
+name only identifiable to genus still aligns, and families and other higher ranks are kept whole.
+
+The same works for the Catalogue of Life, and for several countries at once. For a WCVP list, GBIF's
+search is limited to vascular plants automatically; for others, name the GBIF group(s) with
+`gbif_taxon` to keep the search to the relevant part of GBIF:
+
+```{r}
+#| eval: false
+col_au_nz <- load_CoL() |>
+  filter_to_country(c("AU", "NZ"), gbif_taxon = c("Animalia", "Plantae", "Fungi"))
+```
+
+GBIF's names are fetched once per country (one facet query, then GBIF's name parser) and cached, like
+the downloads above. `attr(wcvp_au, "unmatched")` lists the names GBIF has records of in the country
+that matched nothing in the reference -- names it lacks, or spells differently -- which is worth a look.
+
+GBIF's records include cultivated, introduced and, for animals, fossil occurrences as well as native
+ones. Any GBIF occurrence filter can be passed through to narrow them, e.g. only preserved specimens:
+
+```{r}
+#| eval: false
+wcvp_au_specimens <- load_WCVP() |> filter_to_country("AU", basisOfRecord = "PRESERVED_SPECIMEN")
+```
 
 ## Combining references
 
@@ -159,7 +265,7 @@ tables: in a list, most preferred first. Released lists can be mixed in too:
 ```{r}
 #| eval: false
 resources <- prepare_taxonomic_resources(c(
-  list(mine = my_reference, afd_csv = afd_csv),
+  list(mine = my_reference, fungi_now = fungi_now),
   load_taxonomic_resources("GBIF_AU")
 ))
 ```

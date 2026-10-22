@@ -1,6 +1,6 @@
-# Small string helpers shared with taxonAlign, copied here (rather than imported) because taxonAlign
+# A small string helper shared with taxonAlign, copied here (rather than imported) because taxonAlign
 # keeps them internal -- the same reason taxonAlign vendors its own copies of APCalign's internal
-# helpers. Keep them identical to taxonAlign's `R/match_taxa_helpers.R` versions: a name reshaped here
+# helpers. Keep it identical to taxonAlign's `R/match_taxa_helpers.R` version: a name reshaped here
 # must split into genus/subgenus exactly the way taxonAlign splits it when matching.
 
 ## function for extracting the first "genus" - including with hybrids
@@ -21,12 +21,39 @@ extract_genus <- function(taxon_name) {
   genus
 }
 
-# Removes a bracketed subgenus from a species-level name: "Pardalotus (Pardalotinus) striatus" ->
-# "Pardalotus striatus". Only the zoological "Genus (Subgenus) epithet..." shape is touched -- a
-# bracket directly after the genus, followed by at least one more word (it may hold more than one
-# subgenus, "Nassa (Alectryon, Aciculina) macrocephalus") -- so e.g. "Agaricia papillosa (pars)" or
-# "Calodema (regale species group)" are left as they are.
+# Downloads `url` to `dest`, via a temporary file renamed only on success, so a failed download never
+# leaves a partial file where a complete one is expected (or removes one already there). A generous
+# time limit: these are full-checklist downloads (~90-170MB), far past R's default 60 seconds.
 #' @noRd
-strip_subgenus_from_name <- function(x) {
-  stringr::str_replace(x, "^(\\S+) \\([^()]+\\) (\\S.*)$", "\\1 \\2")
+download_to_cache <- function(url, dest, what = basename(dest), quiet = FALSE) {
+  dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+  partial <- paste0(dest, ".part")
+  old <- options(timeout = max(3600, getOption("timeout")))
+  on.exit(options(old), add = TRUE)
+  if (!quiet) message("Downloading ", what, "...")
+  ok <- tryCatch(
+    utils::download.file(url, partial, mode = "wb", quiet = TRUE) == 0,
+    error = function(e) FALSE, warning = function(w) FALSE
+  )
+  if (ok) ok <- file.rename(partial, dest)
+  if (!ok) {
+    unlink(partial)
+    stop("Couldn't download ", what, " (", url, "). Check that you're online.", call. = FALSE)
+  }
+  dest
 }
+
+# The result of a short web request (`curl`), or NULL if it fails or times out -- for the small
+# metadata lookups that decide which version to use, so being offline falls back to a cached copy
+# straight away rather than hanging.
+#' @noRd
+try_fetch <- function(url, nobody = FALSE) {
+  tryCatch({
+    handle <- curl::new_handle(connecttimeout = 5, timeout = 30, nobody = nobody, followlocation = TRUE)
+    response <- curl::curl_fetch_memory(url, handle = handle)
+    if (response$status_code != 200) NULL else response
+  }, error = function(e) NULL)
+}
+
+#' @noRd
+`%||%` <- function(a, b) if (is.null(a)) b else a

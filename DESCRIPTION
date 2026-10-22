@@ -7,7 +7,8 @@ Authors@R: c(
     )
 Description: Companion to taxonAlign. Turns taxonomic references into the
   format taxonAlign matches names against: reshapes the Australian National Species
-  List and Australian Faunal Directory exports and the Australian Plant Census, builds
+  List exports (including the Australian Faunal Directory's), the Australian Plant
+  Census, the World Checklist of Vascular Plants and the Catalogue of Life, builds
   references from the GBIF backbone (live, or from taxadb's snapshots), and walks users
   through mapping their own reference tables onto the format interactively. Also builds
   the versioned data releases that taxonAlign::load_taxonomic_resources() downloads.
@@ -17,7 +18,9 @@ Roxygen: list(markdown = TRUE)
 Imports:
     APCalign,
     arrow,
+    curl,
     dplyr,
+    jsonlite,
     parallel,
     purrr,
     readr,

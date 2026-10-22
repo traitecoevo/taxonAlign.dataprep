@@ -17,15 +17,27 @@ history for it before the split is in that repo.
 Exported functions, each returning one flat table in taxonAlign's format:
 - `generate_GBIF_taxonomic_reference_list()` -- live GBIF backbone fetch (Architecture #1).
 - `generate_taxadb_taxonomic_reference_list()` -- taxadb snapshot (Architecture #1b).
-- `load_AFD(path)` -- the AFD's own CSV export, "AFD format" (Architecture #3; was
-  `taxonAlign::load_taxonomic_resources("AFD")`). `path` is now required (no bundled copy).
 - `load_APC()` -- thin `APCalign::load_taxonomic_resources()` wrapper (was
   `taxonAlign::load_taxonomic_resources("APC")`).
-- `load_NSL(taxon_group, path)` -- an NSL export pair (Architecture #4; was
-  `taxonAlign::load_NSL_resources()`). `path` is required; it reads the raw `.csv`/`.txt` exports *or*
-  a release's verbatim `nsl_<group>_{taxon,names}.parquet` copies (`find_NSL_file()` accepts a `.` after
-  the marker). The old `version =` release download is gone -- taxonAlign downloads *ready* files now,
-  and dataprep users have the source files.
+- `load_NSL(taxon_group, path = NULL, version = NULL)` -- an NSL export pair (Architecture #4; was
+  `taxonAlign::load_NSL_resources()`). By default it reads the verbatim
+  `nsl_<group>_{taxon,names}.parquet` copies from a data release (via
+  `taxonAlign::download_data_release_files()`), so -- like `taxonAlign::load_taxonomic_resources()` and
+  APCalign -- no file of the user's own is needed (user's requirement); `path` reads raw `.csv`/`.txt`
+  exports, or a folder of a release's parquet copies (`find_NSL_file()` accepts a `.` after the marker).
+- **No `load_AFD()`** (removed 2026-10-22, user's decision): the AFD comes in through
+  `load_NSL("animals")`. The AFD-format (CSV export) reader is kept, unexported, as the appendix chunk of
+  `vignettes/AFD-data-processing.qmd` (defining `load_AFD()` and its helpers there), for continuing the
+  AFD-format vs NSL-format comparisons for the curators. Architecture #3 below describes that code.
+  Three of its helpers are shared with `load_NSL()` and live in `R/load_NSL.R`: `strip_name_quotes()`,
+  `strip_afd_usage_markers()`, `afd_usage_status()`. Its ~200 offline tests went with it (recoverable
+  from this repo's first commit, f7e4518); its output on the real 2026 and old AFD exports is
+  identical to the pre-split loader's (see "Old vs new comparison" below).
+- `load_WCVP(version = NULL, path = NULL)` -- the World Checklist of Vascular Plants (Kew), and
+  `load_CoL(version = "3LR", path = NULL)` -- the Catalogue of Life from ChecklistBank. Both added
+  2026-10-22 at the user's request; see "Worldwide checklists" below.
+- `filter_to_country(reference, country, gbif_taxon = NULL, ...)` -- restricts any reference (WCVP,
+  COL, ...) to taxa GBIF has occurrence records of in one or more countries; see "Country filter" below.
 - `build_taxonomic_reference()` -- the interactive on-ramp (was
   `taxonAlign::prepare_taxonomic_resources(interactive = TRUE)`); see "Interactive on-ramp" below.
 
@@ -45,9 +57,9 @@ devtools::check()          # full R CMD check
 Imports taxonAlign (`Remotes: traitecoevo/taxonAlign`, plus `traitecoevo/APCalign`). Tests call
 `taxonAlign::prepare_taxonomic_resources()`/`create_taxonomic_update_lookup()`/
 `check_taxonomic_reference()` end to end, against the *installed* taxonAlign -- after changing
-taxonAlign, `devtools::install("../taxonAlign")` before running these tests. `extract_genus()` and
-`strip_subgenus_from_name()` are vendored in `R/utils.R` (taxonAlign keeps them internal); keep them
-identical to taxonAlign's `R/match_taxa_helpers.R` copies.
+taxonAlign, `devtools::install("../taxonAlign")` before running these tests. `extract_genus()` is
+vendored in `R/utils.R` (taxonAlign keeps it internal); keep it identical to taxonAlign's
+`R/match_taxa_helpers.R` copy.
 
 Imports: `APCalign`, `arrow`, `dplyr`, `parallel` (ships with base R, but called via `::` for the
 concurrent GBIF page fetch), `purrr`, `readr`, `rgbif`, `rlang`, `stats`, `stringr`, `taxonAlign`,
@@ -82,17 +94,16 @@ alongside `rgbif::name_backbone()`/`rgbif::occ_search()`. Skipped if `taxadb` is
 error -- and with one real, live test against the actual source.coop URL, gated with
 `skip_if_offline()`/`skip_on_cran()`.
 
-`test-load_AFD.R` covers `load_AFD()` against a small AFD-shaped fixture (`helper-afd-fixtures.R`, see
-Architecture #3), incl. `taxonAlign::check_taxonomic_reference()` on its output. `test-load_NSL.R`
-covers `load_NSL()` against two hand-built NSL taxon/names fixture pairs (`helper-nsl-fixtures.R`) --
+`test-load_NSL.R` covers `load_NSL()` against two hand-built NSL taxon/names fixture pairs (`helper-nsl-fixtures.R`) --
 one plant-side camelCase-CSV, one animals pipe-delimited snake_case -- plus reading a release's
-verbatim parquet copies (identical output to the original files). `test-build_taxonomic_reference.R`
+verbatim parquet copies (identical output to the original files), the release default (taxonAlign's
+download mocked), and the three AFD-marker helpers shared with the vignette's AFD-format reader. `test-build_taxonomic_reference.R`
 covers `build_taxonomic_reference()` by supplying `user_responses` throughout (never a real
 interactive session), mostly going on through `taxonAlign::prepare_taxonomic_resources()` (helper
 `build_and_prepare()`), using a copy of taxonAlign's `sample_taxonomic_resources()` fixture
 (`helper-align-taxa-fixtures.R`). All offline.
 
-218 expectations, all passing as of the last `devtools::test()` run (2026-10-22), with `taxadb`/`duckdb` installed and network access available (so `gbif_snapshot_url`'s one live test ran too).
+233 expectations, all passing as of the last `devtools::test()` run (2026-10-22), with `taxadb`/`duckdb` installed and network access available (so `gbif_snapshot_url`'s one live test ran too).
 
 Gotcha if you add more end-to-end tests: don't wrap a block of `local_mocked_bindings()` calls in a
 plain helper function and call that helper from inside `test_that()` without forwarding `.env` — the
@@ -169,6 +180,122 @@ meaning this function:
   with a column recording which) as have one uniform source. Moved onto the same
   `prompt_column_or_fixed_value()` path as the other two rather than keeping a separate, more limited
   mechanism — this also retired `prompt_free_text()` entirely (it had no other caller).
+
+## Worldwide checklists — `R/load_WCVP.R`, `R/load_CoL.R` (exported: `load_WCVP()`, `load_CoL()`)
+
+Both download their source directly (like `load_APC()`, not via a taxonAlign data release), cache the
+download *and* the reshaped `.rds` under `<cache_dir>/WCVP/` and `<cache_dir>/CoL/`, can be pinned, and
+attach `"version"`/`"citation"` attributes (COL also `"key"`/`"doi"`). Downloads go through
+`download_to_cache()` (`R/utils.R`: temp file renamed on success, 1h timeout -- R's default 60s is far
+too short for these files); version lookups through `try_fetch()` (5s connect / 30s), so being offline
+falls back to a cached copy rather than hanging. Only the required 8 columns (+ WCVP's `family`) are
+returned -- any other character column would be scanned as a hierarchy column by
+`taxonAlign::prepare_taxonomic_resources()` and turned into bogus "taxa" (e.g. `ipni_id`, `powo_id`).
+
+- **WCVP** (checked against version 16, 2026-06-04, 1,448,984 names): `https://sftp.kew.org/pub/data-repositories/WCVP/wcvp.zip`
+  is always the current version; superseded ones move to `Archive/wcvp_v<N>.zip` (v10-v15 there in
+  Oct 2026). The zip's `README_WCVP.xlsx` names its version (`Version "16"`) and citation; read by
+  `WCVP_zip_readme()` from the xlsx's `sharedStrings.xml`, no xlsx dependency. **`version = NULL`
+  downloads the current version the first time, then uses that cached version without going online**
+  (user's requirement, 2026-10-22: "load off their respective APIs [the first time] and thereafter use
+  a cached version"; recorded in `current.dcf`: version, Last-Modified, download date). Only
+  `refresh_cache = TRUE` checks Kew (HEAD request, compare `Last-Modified`; downloads again only if
+  changed; offline -> the cached version with a message). A named version is looked for in the cache,
+  then the archive, then the current zip (whose README must match; this path does check online). `wcvp_names.csv` is pipe-delimited, no quoting (read with
+  `quote = ""`). Mapping: `canonical_name = taxon_name`, `scientific_name` + `taxon_authors`,
+  `accepted_name_usage_ID = accepted_plant_name_id`, else own ID (all 38,571 Unplaced + 8 others have
+  none); every link resolves (checked). Statuses lower-cased, `Orthographic` -> `"orthographic
+  variant"` (`taxonAlign_WCVP_status`; an unknown status errors). `Artificial Hybrid` (4,391) and `Local
+  Biotype` (1,452) are self-referential names, kept as their own statuses -- so, like `"unplaced"`,
+  update_taxa() gives them no accepted name (user confirmed, 2026-10-22). The 2,744 blank-rank names (unmarked trinomials, e.g.
+  *Aquilegia vulgaris inversa*) get rank `"infraspecific name"`. `genus` = `genus_hybrid` + `genus`
+  (`"× Cleisocalpa"`), matching the genus record's own `taxon_name`. No family records exist in WCVP;
+  `family` is kept so prepare synthesises them.
+- **COL** (checked against COL26.10, key 316595, 5,466,019 names): `GET /dataset/{key or alias}`
+  gives the metadata (alias `"3LR"` = latest release); `GET /dataset/{key}/export.zip?format=ColDP`
+  302-redirects to a *prepared* export zip (~169MB; prepared exports existed for every release checked
+  -- COL22, COL25, COL26.10; one that isn't prepared would need a ChecklistBank login to generate,
+  not handled). The plain (non-extended) ColDP zip holds only `metadata.yaml` + `NameUsage.tsv` with six
+  columns: `col:ID`, `col:parentID`, `col:status`, `col:rank`, `col:scientificName`, `col:authorship`.
+  For a synonym (`synonym`/`ambiguous synonym`/`misapplied`), `parentID` is its accepted name (all
+  2.75M checked: every one points at an accepted or provisionally accepted name); for an accepted name
+  it's the parent *taxon*, so accepted rows are made self-referential. IDs are unique.
+  **`"provisionally accepted"` -> `"accepted"`** (86,470 names, plus 12k synonyms leading to them):
+  otherwise update_taxa() would never report their accepted name (user confirmed, 2026-10-22). Rank qualifiers dropped (`"section botany"` -> `"section"`, `"series zoology"` ->
+  `"series"`); subgenus `"Zyras (Craspa)"` -> bare `"Craspa"`, genus `"Zyras"`; `genus` is the first
+  word for genus rank and any multi-word name, else NA. ChecklistBank's citation is HTML only (no
+  plain-text format: 406 for every Accept header tried), so `format_CoL_citation()` rebuilds it from
+  the metadata (creators, year, title, version, publisher, DOI), in COL's own form (19 authors then
+  "et al."). Metadata cached as `<cache_dir>/CoL/<key>/metadata.rds`. **Same cache-first rule as the
+  WCVP**: `"3LR"` is looked up online the first time and recorded in `<cache_dir>/CoL/latest.rds`; later
+  calls use that release without going online, until `refresh_cache = TRUE` looks it up again. A key or
+  alias already cached never goes online; a release's zip, once downloaded, is never downloaded again
+  (releases don't change). Offline with nothing usable cached: `"3LR"` -> the newest cached release,
+  other aliases looked up in the cache, else a clear error.
+- **Slow first time, by design**: COL26.10's first `load_CoL()` took ~23 min here (download slowed by
+  other jobs; ~3 min alone) plus reshaping 5.5M names; a cached load ~20 s (reading the .rds). Both print
+  a "slow the first time" message (user's wording, 2026-10-22) only when nothing is cached. Aligning 10
+  names against the whole COL took ~10 min, nearly all `prepare_taxonomic_resources()` on 5.5M rows --
+  hence the vignette's "prepare once and reuse / filter to a country first" advice.
+- **Seen against the real COL, not a loader bug**: `"Cynthia cardui"` isn't in COL26.10 at all, so it
+  falls to genus; COL has six homonymous genus records `"Cynthia"` (all synonyms, leading to
+  *Halocynthia*, *Bithia*, *Siriella*, *Microcephalus*, *Vanessa*, *Krigia*) and taxonAlign's
+  update_taxa() silently takes the first (`Halocynthia`). A genus synonym leading to several accepted
+  genera gets no split/ambiguity flag (splits handling is species-synonyms-only, by the user's choice) --
+  a taxonAlign question, raised with the user, not changed.
+- Tests: `test-load_WCVP.R`, `test-load_CoL.R` against `helper-checklist-fixtures.R` (each source's own
+  raw layout), network mocked.
+
+## Country filter — `R/filter_to_country.R` (exported: `filter_to_country()`)
+
+The user's design (2026-10-22): download a worldwide reference, then limit it with GBIF's country
+occurrences, accepting that the taxonomies don't match -- a GBIF name recorded in the country can match
+the reference's accepted name *or* a synonym; either way the reference's accepted name is kept, with
+all of its synonyms. Deliberately *not* via WCVP's own TDWG distribution data or COL's patchy
+distribution data (the user stopped that line of investigation): GBIF works the same for any reference.
+- **Names, not keys**: one `rgbif::occ_search(facet = "scientificName", scientificName.facetLimit =
+  1e5, facetOffset paging)` per country (per `gbif_taxon` root) returns the names occurrences are
+  identified to, with authorship (56,825 for AU Tracheophyta, one request) -- no backbone tree needed,
+  unlike `generate_GBIF_taxonomic_reference_list()`'s key-based country filter. rgbif's default
+  `occurrenceStatus = "PRESENT"` applies. Names are parsed with `rgbif::name_parse()` in batches of 1000
+  (~3s each; ~3 min for AU plants), keeping `canonicalnamewithmarker`. Cached as
+  `<cache_dir>/gbif_names_<rootkey|all>_<CC>[_<hash of extra filters>].rds`, cache-first like
+  load_WCVP() (no age limit; `refresh_cache = TRUE` to refetch).
+- **Matching** (`country_match_key()`): `APCalign::strip_names()` on both sides, hybrid sign always
+  followed by a space (GBIF's parser writes `"Acaena ×ovina"`, WCVP `"Acaena × ovina"`), and on the GBIF
+  side an autonym becomes its species (`"Cheilanthes sieberi subsp. sieberi"` -> `"cheilanthes
+  sieberi"`; WCVP doesn't list autonyms). Exact only, no fuzzy matching (over-inclusion risk). These two
+  fixes took AU matched species-level names from 49,826 to 50,653 of 52,330; the remaining 1,677 are
+  spelling/gender variants (`"Cycnogeton procerum"`), informal names (`"Eucalyptus spec."`) and names
+  WCVP lacks -- returned as `attr(x, "unmatched")`.
+- **Retention** (`country_filter_records()`): species level = multi-word, not genus/subgenus rank;
+  keep every record whose accepted ID is the accepted ID of a recorded name; `whole_species = TRUE`
+  also keeps every accepted taxon sharing a binomial with a kept one (subspecies/varieties of a kept
+  species, the species of a kept subspecies), with synonyms. Genera of kept taxa (and genera recorded at
+  genus rank) kept with their synonyms; subgenera of kept genera; everything above genus kept whole;
+  finally every record a kept record leads to, so the result passes `check_taxonomic_reference()`.
+- `gbif_taxon` defaults by `taxonomic_dataset` (`taxonAlign_country_filter_default_taxon`: WCVP ->
+  `"Tracheophyta"`, key 7707728); otherwise no taxon limit (every occurrence in the country). Extra
+  `...` go to `occ_search()` (e.g. `basisOfRecord`), and into the cache key.
+- Real run, WCVP 16 + AU (2026-10-22): 326,436 of 1,448,984 records kept, ~1.6 min first time.
+  Real linking example (used in the vignette): GBIF's AU records use *Polypompholyx multifida*, a WCVP
+  synonym of *Utricularia multifida*. (*Racosperma dealbatum* -> *Acacia dealbata* is a WCVP synonym but
+  isn't in GBIF's AU names -- don't use it as the example.)
+- Tests: `test-filter_to_country.R` (rgbif mocked).
+
+## Old vs new comparison (2026-10-22)
+
+After the split, the big compilations were rebuilt with the pre-split taxonAlign (`f6f691d`,
+installed into a scratch library) and with the split packages, on identical inputs, and compared with
+`all.equal()`: **all identical**. That covers each NSL group (old `load_NSL_resources()` vs `load_NSL()`
+from the release's raw files vs the ready `NSL_<group>.parquet`); `GBIF_AU` (vs the old loader minus
+its 47,796 extant no-name rows, which prepare dropped anyway); the AFD format (2026 export and old
+`AFD.csv`, old loader vs the vignette's reader); the 28-phylum AU invertebrate GBIF reference rebuilt
+from `ignore/gbif_cache_backup`; every prepared `resources` table (NSL animals, NSL animals + GBIF_AU,
+AFD 2026, AFD + GBIF inverts, the four plant-side NSL groups); and the full 5,154-name
+`create_taxonomic_update_lookup(full = TRUE)` against four of those references (all 40 columns). Only
+difference in output: the old run's "missing (NA) canonical_name" warning, gone because `GBIF_AU` no
+longer contains those rows. Scripts were in the session scratchpad, not kept.
 
 ## Architecture
 
@@ -467,7 +594,7 @@ implemented per [issue #19](https://github.com/traitecoevo/taxonAlign/issues/19)
     its own live external dependency) confirms `"Trachytetra"` resolves for real, not just against a
     mock.
 
-### 3. Known-source reference loaders — `R/load_AFD.R`, `R/load_APC.R` (exported: `load_AFD()`, `load_APC()`; internal helpers `@noRd`)
+### 3. Known-source reference loaders — `R/load_APC.R` (exported: `load_APC()`); the AFD-format reader now lives in `vignettes/AFD-data-processing.qmd`'s appendix
 
 `load_taxonomic_resources(taxonomic_dataset = ...)` (issue #6) fetches/reshapes a fixed set of *known*
 taxonomic datasets into taxonAlign's flat, `prepare_taxonomic_resources()`-ready column schema
@@ -861,6 +988,16 @@ often doesn't change for long periods).
   keys from `ignore/gbif_vertebrates_worldwide.rds`) -- the first attempt, paging all of Chordata, was
   hopelessly slow (GBIF deep paging). Vertebrates therefore only have TRUE/NA. Combined table:
   `ignore/gbif_au_animals_with_extinct.rds` (419,088 records; 20,244 extinct).
+- **Next GBIF_AU rebuild: try the 2026 GBIF snapshot first** (user, 2026-10-22: "I'll forget!").
+  `generate_taxadb_taxonomic_reference_list("Animalia", rank = "kingdom", country = "AU",
+  gbif_snapshot_url = "https://data.source.coop/cboettig/taxadb/2026/dwc_gbif_part_0.parquet",
+  facet_limit = 3e5)` replaces the multi-day live backbone fetch (~99.9% name agreement with it,
+  Architecture #1b). It existed (since 2026-09-18) when the first release was built but wasn't
+  considered. The country filter is still GBIF's occurrence API either way; the snapshot has no
+  extinct flag, so still flag extinct taxa per family as above; it's an unversioned file the
+  maintainer hasn't validated, so diff the result against the previous release before publishing.
+  Written up for humans in taxonAlign's `vignettes/development-history.qmd` ("A faster route that
+  turned up afterward").
 - **Offline behaviour** (user requirement, from APCalign's failure mode of searching for new versions
   when offline): a named release already downloaded never touches the network; without `version`,
   `data_release_versions()` asks GitHub once per session via `curl` with a 5s connect / 10s total

@@ -6,7 +6,8 @@
 \usage{
 load_NSL(
   taxon_group,
-  path,
+  path = NULL,
+  version = NULL,
   refresh_cache = FALSE,
   cache_dir = tools::R_user_dir("taxonAlign", "cache"),
   quiet = FALSE
@@ -16,12 +17,19 @@ load_NSL(
 \item{taxon_group}{Character scalar naming the group to load: one of \code{"animals"}, \code{"algae"},
 \code{"bryophytes"}, \code{"fungi"}, \code{"lichens"}.}
 
-\item{path}{Directory holding the group's taxon/names file pair.}
+\item{path}{Optional directory holding your own copy of the group's taxon/names file pair (as
+exported from the NSL). When \code{NULL} (the default), the verbatim exports stored in a taxonAlign data
+release are used instead (see \code{version}).}
 
-\item{refresh_cache}{Logical; if \code{TRUE}, re-reshapes the raw files even if a cached copy exists.
+\item{version}{Data release to read, a date (\code{"YYYY-MM-DD"}); see \code{\link[taxonAlign:data_release_versions]{taxonAlign::data_release_versions()}}.
+Defaults to the latest release, or, with no internet connection, the newest release already
+downloaded. Ignored when \code{path} is given.}
+
+\item{refresh_cache}{Logical; if \code{TRUE}, re-downloads (for a release) and re-reshapes the raw files
+even if cached copies exist.
 Defaults to \code{FALSE}.}
 
-\item{cache_dir}{Directory the reshaped result is cached in. Defaults to
+\item{cache_dir}{Directory downloaded release files and the reshaped result are cached in. Defaults to
 \code{tools::R_user_dir("taxonAlign", "cache")}.}
 
 \item{quiet}{Logical; suppress progress messages. Defaults to \code{FALSE}.}
@@ -29,7 +37,7 @@ Defaults to \code{FALSE}.}
 \value{
 A tibble in taxonAlign's reference format (see \code{\link[taxonAlign:taxonomic_reference_schema]{taxonAlign::taxonomic_reference_schema()}}).
 Combine groups the same way as any other references, e.g.
-\code{taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi", f), load_NSL("lichens", l)))}.
+\code{taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi"), load_NSL("lichens")))}.
 }
 \description{
 Reads the Australian National Species List (NSL) export for one taxonomic group --
@@ -42,11 +50,12 @@ promoted to a full taxon concept, but with no accepted-name resolution of its ow
 }
 \details{
 This is the function that builds the ready-to-use NSL files in a taxonAlign data release, which
-\code{\link[taxonAlign:load_taxonomic_resources]{taxonAlign::load_taxonomic_resources()}} downloads (see \code{data-raw/build_data_release.R}). Use it
-directly to reshape an export you have yourself, or to rebuild a release's ready file from the
-verbatim export files stored alongside it.
+\code{\link[taxonAlign:load_taxonomic_resources]{taxonAlign::load_taxonomic_resources()}} downloads (see \code{data-raw/build_data_release.R}). By default
+it reads the verbatim copies of the group's exports stored in a data release, the same way
+\code{\link[taxonAlign:load_taxonomic_resources]{taxonAlign::load_taxonomic_resources()}} reads the ready files, so the result is the release's
+ready file rebuilt from its sources. Pass \code{path} instead to reshape an export you have yourself.
 
-Three file shapes are accepted: comma-delimited \code{.csv} files with camelCase column names (the
+Three file shapes are accepted from \code{path}: comma-delimited \code{.csv} files with camelCase column names (the
 plant-side groups), pipe-delimited \code{.txt} files with snake_case column names (the animals export),
 and the verbatim \code{.parquet} copies stored in a data release. Files are located by a \code{taxon}/\code{name(s)}
 marker in their filename (e.g. \verb{AFL-taxon-2026-09-18.csv}, \code{AFD_export_name_20260929.txt},

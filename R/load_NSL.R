@@ -60,11 +60,12 @@ taxonAlign_NSL_non_synonymy_statuses <- c(
 #' promoted to a full taxon concept, but with no accepted-name resolution of its own).
 #'
 #' This is the function that builds the ready-to-use NSL files in a taxonAlign data release, which
-#' [taxonAlign::load_taxonomic_resources()] downloads (see `data-raw/build_data_release.R`). Use it
-#' directly to reshape an export you have yourself, or to rebuild a release's ready file from the
-#' verbatim export files stored alongside it.
+#' [taxonAlign::load_taxonomic_resources()] downloads (see `data-raw/build_data_release.R`). By default
+#' it reads the verbatim copies of the group's exports stored in a data release, the same way
+#' [taxonAlign::load_taxonomic_resources()] reads the ready files, so the result is the release's
+#' ready file rebuilt from its sources. Pass `path` instead to reshape an export you have yourself.
 #'
-#' Three file shapes are accepted: comma-delimited `.csv` files with camelCase column names (the
+#' Three file shapes are accepted from `path`: comma-delimited `.csv` files with camelCase column names (the
 #' plant-side groups), pipe-delimited `.txt` files with snake_case column names (the animals export),
 #' and the verbatim `.parquet` copies stored in a data release. Files are located by a `taxon`/`name(s)`
 #' marker in their filename (e.g. `AFL-taxon-2026-09-18.csv`, `AFD_export_name_20260929.txt`,
@@ -97,20 +98,27 @@ taxonAlign_NSL_non_synonymy_statuses <- c(
 #'
 #' @param taxon_group Character scalar naming the group to load: one of `"animals"`, `"algae"`,
 #'  `"bryophytes"`, `"fungi"`, `"lichens"`.
-#' @param path Directory holding the group's taxon/names file pair.
-#' @param refresh_cache Logical; if `TRUE`, re-reshapes the raw files even if a cached copy exists.
+#' @param path Optional directory holding your own copy of the group's taxon/names file pair (as
+#'  exported from the NSL). When `NULL` (the default), the verbatim exports stored in a taxonAlign data
+#'  release are used instead (see `version`).
+#' @param version Data release to read, a date (`"YYYY-MM-DD"`); see [taxonAlign::data_release_versions()].
+#'  Defaults to the latest release, or, with no internet connection, the newest release already
+#'  downloaded. Ignored when `path` is given.
+#' @param refresh_cache Logical; if `TRUE`, re-downloads (for a release) and re-reshapes the raw files
+#'  even if cached copies exist.
 #'  Defaults to `FALSE`.
-#' @param cache_dir Directory the reshaped result is cached in. Defaults to
+#' @param cache_dir Directory downloaded release files and the reshaped result are cached in. Defaults to
 #'  `tools::R_user_dir("taxonAlign", "cache")`.
 #' @param quiet Logical; suppress progress messages. Defaults to `FALSE`.
 #'
 #' @return A tibble in taxonAlign's reference format (see [taxonAlign::taxonomic_reference_schema()]).
 #'  Combine groups the same way as any other references, e.g.
-#'  `taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi", f), load_NSL("lichens", l)))`.
+#'  `taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi"), load_NSL("lichens")))`.
 #'
 #' @export
 load_NSL <- function(taxon_group,
-                     path,
+                     path = NULL,
+                     version = NULL,
                      refresh_cache = FALSE,
                      cache_dir = tools::R_user_dir("taxonAlign", "cache"),
                      quiet = FALSE) {
@@ -121,16 +129,27 @@ load_NSL <- function(taxon_group,
       ".", call. = FALSE
     )
   }
-  if (missing(path) || !dir.exists(path)) {
-    stop(
-      "Couldn't find the NSL reference folder for \"", taxon_group, "\"",
-      if (!missing(path)) paste0(" at \"", path, "\""), ". ",
-      "Pass `path` to point at the directory holding its taxon/names file pair.",
-      call. = FALSE
+  if (is.null(path)) {
+    # the verbatim copies of the group's two exports stored in a data release
+    files <- taxonAlign::download_data_release_files(
+      paste0("nsl_", taxon_group, c("_taxon", "_names"), ".parquet"), version,
+      refresh_cache = refresh_cache, cache_dir = cache_dir, quiet = quiet
     )
+    taxon_file <- files[[1]]
+    names_file <- files[[2]]
+    path <- paste0("taxonAlign data release ", basename(dirname(taxon_file)))
+  } else {
+    if (!dir.exists(path)) {
+      stop(
+        "Couldn't find the NSL reference folder for \"", taxon_group, "\" at \"", path, "\". ",
+        "Pass `path` to point at the directory holding its taxon/names file pair, or leave it out to ",
+        "use the verbatim exports in a taxonAlign data release.",
+        call. = FALSE
+      )
+    }
+    taxon_file <- find_NSL_file(path, "taxon", taxon_group)
+    names_file <- find_NSL_file(path, "names?", taxon_group)
   }
-  taxon_file <- find_NSL_file(path, "taxon", taxon_group)
-  names_file <- find_NSL_file(path, "names?", taxon_group)
 
   if (!dir.exists(cache_dir)) dir.create(cache_dir, recursive = TRUE)
   cache_key <- paste(
@@ -185,7 +204,7 @@ find_NSL_file <- function(dir, marker, taxon_group) {
 # Reads one NSL export file -- a verbatim parquet copy from a taxonAlign data release, or an export as
 # downloaded from the NSL, sniffing the delimiter from its header line (the animals export is
 # pipe-delimited, the plant-side groups comma-delimited) and normalising column names to snake_case.
-# Every column is forced to character on read -- matches load_AFD()'s own reasoning: readr's sample-
+# Every column is forced to character on read -- readr's sample-
 # based type-guessing can mis-infer a sparsely-populated column (e.g. infraspecific_epithet) as
 # logical, which breaks the moment a real value shows up.
 #' @noRd
@@ -351,4 +370,45 @@ clean_NSL_canonical_names <- function(raw) {
   }
   raw$canonical_name[marked] <- strip_afd_usage_markers(raw$canonical_name[marked])
   raw
+}
+
+# Name-cleaning helpers for the AFD's markers, which also turn up in the AFD's NSL export (the
+# "animals" group). Written for the AFD's own CSV export (the "AFD format"), whose loader (load_AFD())
+# was removed on 2026-10-22 once the AFD's NSL format was released -- recover it from git (taxonAlign
+# commit f6f691d, or this repo's first commit) if the AFD format is ever needed again.
+
+# Removes quote marks around a word or name ("'Ochlerotatus' notoscriptus", "\"Ziba\" flammea",
+# "'Callidium signiferum'") -- both AFD formats use them to flag a doubtful generic placement, which the
+# scientific name keeps -- but not an apostrophe inside a word ("Allotria d'arci", "Geoplana m'mahoni").
+#' @noRd
+strip_name_quotes <- function(x) {
+  x <- stringr::str_remove_all(x, "(?<!\\p{L})['\"\u2018\u2019\u201c\u201d]|['\"\u2018\u2019\u201c\u201d](?!\\p{L})")
+  stringr::str_squish(x)
+}
+
+# The AFD format marks misapplied and part usages inside its SYNONYMS free text -- "sensu Author",
+# "auct."/"auctt."/"auctorum", "non Author", "(part)"/"[part]"/"(part.)"/"[pars]" -- which the NSL format
+# drops, labelling the name plain "synonym". afd_usage_status() reads them (they matter for choosing
+# between a name's several accepted names); this removes them, and anything after "sensu"/"non", from
+# the name itself.
+#' @noRd
+strip_afd_usage_markers <- function(x) {
+  x <- stringr::str_remove_all(x, stringr::regex("\\s*[\\[(]\\s*(part|pars)\\.?\\s*[\\])]", ignore_case = TRUE))
+  x <- stringr::str_remove(x, "\\s+(sensu|non|nec)\\b.*$")
+  x <- stringr::str_remove_all(x, "\\s*\\[?\\b(auctt?\\.?|auctorum)\\]?(?=\\s|,|$)")
+  stringr::str_squish(stringr::str_remove(x, "\\s*,\\s*$"))
+}
+
+# taxonomic_status implied by the AFD format's usage markers (see strip_afd_usage_markers()), or `status`
+# unchanged when there are none.
+#' @noRd
+afd_usage_status <- function(x, status) {
+  misapplied <- grepl("\\s(sensu|non|nec)\\b|\\b(auctt?\\.?|auctorum)(?=[\\s,\\]]|$)", x, perl = TRUE)
+  part <- grepl("(?i)[\\[(]\\s*(part|pars)\\.?\\s*[\\])]", x, perl = TRUE)
+  dplyr::case_when(
+    misapplied & part ~ "pro parte misapplied",
+    misapplied ~ "misapplied",
+    part ~ "pro parte synonym",
+    TRUE ~ status
+  )
 }
