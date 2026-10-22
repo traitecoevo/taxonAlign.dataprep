@@ -1031,5 +1031,7 @@ sections of taxonAlign's own get-started vignette at the split). Same treatment 
 vignettes: not a formal knitr vignette (`vignettes/` is build-ignored), rendered directly with `quarto
 render vignettes/get-started.qmd` against the *installed* packages, with one small live GBIF call
 (`"Aporocera"`, `country = "AU"`). Clean up the `*_files/`/`.knit.md`/`.html` leftovers afterwards
-(gitignored). `vignettes/AFD-data-processing.qmd` is the curator-facing record of every AFD-format/NSL-format
+(gitignored). `vignettes/AFD-data-processing.qmd` is sent to the AFD curators as a single HTML file, so render it
+self-contained: `quarto render vignettes/AFD-data-processing.qmd -M embed-resources:true` (a plain
+render depends on a separate `_files/` folder, which an emailed file loses). It is the curator-facing record of every AFD-format/NSL-format
 transformation (Architecture #4) -- keep it in sync if either loader's rules change.

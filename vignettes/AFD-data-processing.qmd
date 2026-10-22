@@ -1,7 +1,7 @@
 ---
 title: "Processing the Australian Faunal Directory exports in taxonAlign"
 subtitle: "A report for the AFD curators"
-date: 2026-10-07
+date: 2026-10-22
 format:
   html:
     toc: true
@@ -20,10 +20,16 @@ Directory (AFD) is the core reference for Australian animals.
 
 We received the AFD in two formats and wrote a separate loading function for each:
 
-| Export | Received | File(s) | taxonAlign function |
+| Export | Received | File(s) | Loading function |
 |---|---|---|---|
-| AFD format | 7 October 2026 | `Anamalia_all_ranks.csv` (130,503 rows) | `load_AFD(path = ...)` |
-| NSL format | 29 September 2026 | `AFD_export_taxon_20260929.txt` (312,601 rows), `AFD_export_name_20260929.txt` (314,913 rows) | `load_NSL("animals", path = ...)` |
+| AFD format | 7 October 2026 | `Anamalia_all_ranks.csv` (130,503 rows) | `load_AFD(path = ...)`, in this document's [appendix](#afd-format-reader) |
+| NSL format | 29 September 2026 | `AFD_export_taxon_20260929.txt` (312,601 rows), `AFD_export_name_20260929.txt` (314,913 rows) | `load_NSL("animals")`, in the companion package [taxonAlign.dataprep](https://github.com/traitecoevo/taxonAlign.dataprep) |
+
+taxonAlign now uses the NSL format. It is published, with your permission, in taxonAlign's first data
+release ([`2026-10-07`](https://github.com/traitecoevo/taxonAlign.dataprep/releases/tag/2026-10-07)):
+the export exactly as supplied, and the reshaped list taxonAlign matches against (the dataset
+`"NSL_animals"`). The AFD-format loader is no longer part of either package; it is kept in this
+document's appendix so the two formats can still be compared.
 
 The two loaders were written independently, each applying its own rules to its own format. That lets
 us compare the results as an independent check that information was carried correctly from one
@@ -480,7 +486,10 @@ share one genus can be collapsed to that genus instead (`"Genus sp. [collapsed n
 candidate is suggested first is decided by status precedence, and then, for a tie, by taxonAlign's
 own rules (an accepted name sharing the name's epithet, then one of the same rank, then one published
 no later than the name, then the oldest, then the order the source lists them in). These rules are a
-stopgap, not a judgement on the taxonomy: the ties themselves are for the curators to resolve.
+stopgap, not a judgement on the taxonomy: the ties themselves are for the curators to resolve. A
+name whose candidates are all the same accepted name -- the same valid name listed twice (see
+[Valid names that appear twice](#possible-errors)) -- is not reported this way: it is matched to the
+first record, with no alternatives listed.
 
 ::: {.callout-note collapse="true"}
 ## The 461 names that are a tie in both formats
@@ -1457,6 +1466,10 @@ from recent extinctions, so this also leaves out a few historically extinct spec
 such as the thylacine. That leaves 398,844 records. A GBIF name counts as present in the AFD if the
 same name appears anywhere in the NSL format (taxon or name file, any rank or status), ignoring how a
 subgenus is written.
+
+This GBIF list is also published in taxonAlign's `2026-10-07` data release (dataset `"GBIF_AU"`,
+without the 47,797 records GBIF holds with no usable name, almost all of them BOLD Barcode Index
+Numbers).
 
 **152,704 GBIF records (148,196 distinct names) are not in the AFD.** The full list, with GBIF's
 classification for each name, is in the file `GBIF_AU_names_not_in_AFD.csv`. Each name is placed in
