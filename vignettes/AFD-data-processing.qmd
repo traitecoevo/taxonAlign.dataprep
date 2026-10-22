@@ -25,10 +25,10 @@ We received the AFD in two formats and wrote a separate loading function for eac
 | AFD format | 7 October 2026 | `Anamalia_all_ranks.csv` (130,503 rows) | `load_AFD(path = ...)`, in this document's [appendix](#afd-format-reader) |
 | NSL format | 29 September 2026 | `AFD_export_taxon_20260929.txt` (312,601 rows), `AFD_export_name_20260929.txt` (314,913 rows) | `load_NSL("animals")`, in the companion package [taxonAlign.dataprep](https://github.com/traitecoevo/taxonAlign.dataprep) |
 
-taxonAlign now uses the NSL format. It is published, with your permission, in taxonAlign's first data
+taxonAlign now uses the NSL format. It is published in taxonAlign's provisional data
 release ([`2026-10-07`](https://github.com/traitecoevo/taxonAlign.dataprep/releases/tag/2026-10-07)):
 the export exactly as supplied, and the reshaped list taxonAlign matches against (the dataset
-`"NSL_animals"`). The AFD-format loader is no longer part of either package; it is kept in this
+`"NSL_animals"`). The AFD-format loader is in this
 document's appendix so the two formats can still be compared.
 
 The two loaders were written independently, each applying its own rules to its own format. That lets
@@ -49,8 +49,7 @@ All counts below come from running the loaders on the files listed above.
 
 ### What we do *not* do
 
-The loaders only reshape the data. They do not decide which taxa to include: no taxa are removed for
-being marine, introduced, extralimital and so on. The only rows left out are placeholders that don't
+The loaders only reshape the data. The only rows left out are placeholders that don't
 represent a nameable taxon (see [Unplaced rows](#unplaced-rows)).
 
 ## The target format
@@ -68,9 +67,7 @@ Both loaders produce the same flat table, one row per name, with these columns:
 | `taxon_ID` | Identifier of this name record |
 | `accepted_name_usage_ID` | `taxon_ID` of the accepted name this record resolves to (itself, if accepted) |
 
-The `accepted_name_usage_ID` column drives name updating. When a raw name matches a synonym,
-taxonAlign follows this link to report the accepted name. So the most important question for each
-loader is whether that link really means "this name is a synonym of that name".
+The `accepted_name_usage_ID` column matches synonyms to their accepted names.
 
 ## The AFD format
 
@@ -289,6 +286,12 @@ ignoring how the subgenus is written. The two files are dated eight days apart (
 | Only in the AFD format | 1,308 |
 | Only in the NSL taxon file | 2,658 |
 | **Total** | **241,998** |
+
+Every name that differs is listed in the spreadsheet `AFD_format_vs_NSL_format_differences.csv`
+(4,750 names), with the reason for each. It also lists the names that lead to the same set of
+accepted names in both formats where status precedence can't pick the same one in both (761 of the
+1,812). For each name it gives the accepted name(s) in each format, every record linking them with its
+status, and the name taxonAlign would suggest in each format, where status precedence decides.
 
 ### Names only in one format
 
