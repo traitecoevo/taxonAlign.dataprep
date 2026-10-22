@@ -22,7 +22,7 @@ The work is split between two packages:
   currently accepted name. It also downloads the ready-made reference lists (the National Species
   Lists, and GBIF's list of Australian animals) from dated data releases. If your taxa are covered by
   one of those lists, or you already have a reference table in taxonAlign's format, it's all you need.
-- **[taxonAlign.dataprep](https://github.com/traitecoevo/taxonalign-dataprep)** builds reference
+- **[taxonAlign.dataprep](https://github.com/traitecoevo/taxonAlign.dataprep)** builds reference
   lists -- from GBIF, the Catalogue of Life, the World Checklist of Vascular Plants, the Australian
   Plant Census, or your own table -- and builds taxonAlign's data releases.
 
@@ -39,7 +39,7 @@ To build your own reference lists as well, install taxonAlign.dataprep, which in
 along with it:
 
 ``` r
-pak::pak("traitecoevo/taxonalign-dataprep")
+pak::pak("traitecoevo/taxonAlign.dataprep")
 ```
 
 ## About this package

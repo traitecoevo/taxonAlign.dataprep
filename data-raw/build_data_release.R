@@ -187,7 +187,7 @@ message("Built ", nrow(manifest), " files in ", out_dir)
 
 # ---- publishing (run by hand, after checking the files) ------------------------------------------------
 # Create the release as a draft first; publish it as a separate step:
-#   gh release create <release_date> --repo traitecoevo/taxonalign-dataprep --draft \
+#   gh release create <release_date> --repo traitecoevo/taxonAlign.dataprep --draft \
 #     --title "Data release <release_date>" --notes-file <out_dir>/release_notes.md \
 #     <out_dir>/*.parquet <out_dir>/manifest.csv
-#   gh release edit <release_date> --repo traitecoevo/taxonalign-dataprep --draft=false
+#   gh release edit <release_date> --repo traitecoevo/taxonAlign.dataprep --draft=false

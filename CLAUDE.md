@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this package is
 
-`taxonAlign.dataprep` (repo `traitecoevo/taxonalign-dataprep`; R package names can't have a hyphen, so
-it's dotted, traits.build-style) is the companion to [taxonAlign](https://github.com/traitecoevo/taxonAlign)
+`taxonAlign.dataprep` (repo `traitecoevo/taxonAlign.dataprep` -- created as `taxonalign-dataprep`, renamed to match the
+package on 2026-10-22; the local folder is still `../taxonalign-dataprep`. Dotted, traits.build-style,
+since R package names can't have a hyphen) is the companion to [taxonAlign](https://github.com/traitecoevo/taxonAlign)
 (sibling checkout `../taxonAlign`). taxonAlign matches and updates names against a reference in its
 documented format (`taxonAlign::taxonomic_reference_schema()`); this package builds references in that
 format and builds the dated data releases `taxonAlign::load_taxonomic_resources()` downloads. Split out
@@ -960,7 +961,7 @@ without re-fetching anything).
   `traitecoevo/taxonAlign` has the pre-split layout and is superseded. A rebuilt `2026-10-07` (same
   data, plus ready files; 16 files) was built locally but couldn't be created as a draft here until this
   repo has a pushed commit to tag.
-- Publish: `gh release create <date> --repo traitecoevo/taxonalign-dataprep --draft ...`; user agreed:
+- Publish: `gh release create <date> --repo traitecoevo/taxonAlign.dataprep --draft ...`; user agreed:
   draft -> review -> publish as **pre-release** for testers -> mark final.
 
 **Pre-split notes** (asset names, function names as they were then):
