@@ -295,7 +295,10 @@ from `ignore/gbif_cache_backup`; every prepared `resources` table (NSL animals, 
 AFD 2026, AFD + GBIF inverts, the four plant-side NSL groups); and the full 5,154-name
 `create_taxonomic_update_lookup(full = TRUE)` against four of those references (all 40 columns). Only
 difference in output: the old run's "missing (NA) canonical_name" warning, gone because `GBIF_AU` no
-longer contains those rows. Scripts were in the session scratchpad, not kept.
+longer contains those rows. Scripts were in the session scratchpad, not kept. (Run before taxonAlign's
+later 2026-10-22 split fix -- see its CLAUDE.md, "Synonym splits" -- which by design changes
+`alternative_possible_names` for combined references, and for 6 duplicated valid names in each AFD
+format.)
 
 ## Architecture
 
