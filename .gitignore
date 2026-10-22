@@ -1,0 +1,10 @@
+.Rproj.user
+.DS_Store
+# raw source exports and built release files are large and not committed -- the releases themselves
+# keep verbatim copies of every source file
+data-raw/sources/
+data-raw/release/
+vignettes/*.html
+vignettes/*_files/
+vignettes/*.knit.md
+/.quarto/

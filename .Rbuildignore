@@ -1,0 +1,9 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^README\.qmd$
+^\.claude$
+^CLAUDE\.md$
+# scripts that build the data releases, and the source files they read -- not package content
+^data-raw$
+^vignettes$

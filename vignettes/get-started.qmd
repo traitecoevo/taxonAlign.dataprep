@@ -1,0 +1,175 @@
+---
+title: "Getting started with taxonAlign.dataprep"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+execute:
+  warning: false
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+[taxonAlign](https://github.com/traitecoevo/taxonAlign) aligns raw taxon names against a taxonomic
+reference in its own reference format (see `taxonAlign::taxonomic_reference_schema()`). Most users
+never need anything else: taxonAlign's `load_taxonomic_resources()` downloads ready-made references
+from a dated data release.
+
+`taxonAlign.dataprep` is for when you need to build a reference yourself. It:
+
+- reshapes particular sources into taxonAlign's format: the Australian National Species List
+  exports (`load_NSL()`), the Australian Faunal Directory's own export (`load_AFD()`) and the
+  Australian Plant Census (`load_APC()`);
+- builds a reference from the GBIF backbone taxonomy, live (`generate_GBIF_taxonomic_reference_list()`)
+  or from a [taxadb](https://docs.ropensci.org/taxadb/) snapshot
+  (`generate_taxadb_taxonomic_reference_list()`);
+- walks you through turning your own reference tables into the format (`build_taxonomic_reference()`);
+- builds the data releases taxonAlign downloads (`data-raw/build_data_release.R`).
+
+Every function returns one table in taxonAlign's format, which can go straight into taxonAlign's
+matching functions, alone or combined with other references.
+
+```{r setup}
+library(taxonAlign.dataprep)
+library(taxonAlign)
+```
+
+## Your own reference tables
+
+If you have a taxonomic reference table -- your own species list, an export from a museum database,
+whatever -- with its own column names, `build_taxonomic_reference()` maps it onto taxonAlign's
+format. Columns it recognises (taxonAlign's own names, or the Darwin Core ones, such as
+`canonicalName`, `taxonRank`) are picked up automatically; for each required column that's still
+missing you're asked (in the style of `traits.build`'s `metadata_add_traits()`) to pick one of the
+table's columns, or to give a fixed value. Then it asks whether you have any further references to
+add, as many as you like, and, if there's more than one, their priority order:
+
+```{r}
+#| eval: false
+my_reference <- build_taxonomic_reference()
+#> Enter the file path for your taxonomic reference: my_beetles.csv
+#> Does the data have a column for `taxon_rank`, or is every row the same value? ...
+#> ... (column mapping for my_beetles.csv) ...
+#> Do you have any additional taxonomic reference(s) to include? 1: Yes 2: No
+#> Selection: 1
+#> Enter the file path for the additional taxonomic reference: more_beetles.csv
+#> ... (column mapping for more_beetles.csv) ...
+#> Do you have any additional taxonomic reference(s) to include? 1: Yes 2: No
+#> Selection: 2
+#> Multiple taxonomic reference tables were supplied. Enter their priority order ...
+```
+
+The result is one table, combined in that priority order. Save it, check it, and use it:
+
+```{r}
+#| eval: false
+readr::write_csv(my_reference, "my_reference.csv")
+check_taxonomic_reference(my_reference)
+create_taxonomic_update_lookup(c("Xylotoles costatus", "Xylotoles sp. 1"), my_reference)
+```
+
+See `?build_taxonomic_reference` for the full set of prompts, and for supplying the answers in a
+script instead.
+
+## From the GBIF backbone taxonomy
+
+`generate_GBIF_taxonomic_reference_list()` builds a reference from the GBIF backbone taxonomy for any
+taxon name, optionally restricted to a country and/or a minimum rank. The whole subtree is fetched
+once and cached, so repeat calls are fast.
+
+```{r}
+aporocera <- generate_GBIF_taxonomic_reference_list("Aporocera", country = "AU")
+create_taxonomic_update_lookup(c("Aporocera viridipennis", "Aporocera viridipenis", "Aporocera sp. 1"), aporocera)
+```
+
+Real GBIF data can include a handful of "doubtful" or incompletely-classified records with no
+canonical name at all (the backbone also holds BOLD Barcode Index Numbers as unranked "taxa", named
+like `"BOLD:AAX6343"`) -- taxonAlign drops these automatically (with a warning), since a name with no
+usable label could never be matched against anyway.
+
+GBIF's occurrence records include fossil specimens, so a `country` filter would otherwise keep fossil
+taxa. Taxa GBIF flags as extinct, and their synonyms, are left out by default
+(`exclude_extinct = TRUE`); that includes recently extinct species (the thylacine is flagged extinct
+too), and `exclude_extinct = FALSE` keeps them, with an `extinct` column. For all Australian animals at
+once, use the released list (`taxonAlign::load_taxonomic_resources("GBIF_AU")`) rather than building
+it live, which takes many hours.
+
+## From taxadb (a pre-cached snapshot of GBIF, ITIS, and others)
+
+`generate_GBIF_taxonomic_reference_list()` fetches live from GBIF's API -- practical for a small
+clade, but slow for a genuinely large one (a phylum, a large class). For a large group,
+`generate_taxadb_taxonomic_reference_list()` instead sources from
+[taxadb](https://docs.ropensci.org/taxadb/)'s own pre-built, locally-cached snapshot -- fast
+regardless of size, at the cost of the snapshot possibly being out of date (check
+`taxadb:::available_versions()` to see how current it is before relying on it for anything
+time-sensitive, or pass `gbif_snapshot_url` to query a current GBIF snapshot directly):
+
+```{r}
+#| eval: false
+# every taxon in the class Insecta that taxadb's GBIF snapshot has
+insecta <- generate_taxadb_taxonomic_reference_list("Insecta", rank = "class", provider = "gbif")
+
+# the same, restricted to taxa with an Australian GBIF occurrence record
+insecta_au <- generate_taxadb_taxonomic_reference_list(
+  "Insecta", rank = "class", provider = "gbif", country = "AU"
+)
+```
+
+Unlike `generate_GBIF_taxonomic_reference_list()`, `rank` here is required -- it tells the function
+which column (`kingdom`/`phylum`/`class`/`order`/`family`/`genus`) to filter on, since taxadb has no
+single "fetch below this name" concept the way a live GBIF fetch does. `taxadb` is only needed for this
+function, so it's a suggested rather than a required dependency: install it with
+`install.packages("taxadb")` if you use it.
+
+## From the National Species List, the AFD and the APC
+
+`load_NSL()` reshapes one group's National Species List export -- `"animals"` (the Australian Faunal
+Directory's NSL export), `"algae"`, `"bryophytes"`, `"fungi"` or `"lichens"` -- from the folder holding
+its pair of files: the *taxon* file (accepted names and their synonyms, with links between them) and
+the *names* file (every name recorded for the group). This is what builds the released NSL lists; use
+it directly for an export you've downloaded yourself, from the group's NSL export page (e.g.
+`https://fungi.biodiversity.org.au/nsl/services/export/index`):
+
+```{r}
+#| eval: false
+fungi_now <- load_NSL("fungi", path = "my_downloads/fungi_export")
+```
+
+`load_AFD()` reads the Australian Faunal Directory's own CSV export (the "AFD format"; the NSL-format
+export above is the recommended source for the AFD), and `load_APC()` the Australian Plant Census, via
+`APCalign::load_taxonomic_resources()`:
+
+```{r}
+#| eval: false
+afd_csv <- load_AFD("my_downloads/afd_export.csv")
+apc <- load_APC()
+```
+
+`vignettes/AFD-data-processing.qmd` records every transformation `load_AFD()` and `load_NSL()` make to
+the AFD's two export formats, with counts, and how the two compare.
+
+## Combining references
+
+Every function above returns one table, so references combine the way taxonAlign combines any
+tables: in a list, most preferred first. Released lists can be mixed in too:
+
+```{r}
+#| eval: false
+resources <- prepare_taxonomic_resources(c(
+  list(mine = my_reference, afd_csv = afd_csv),
+  load_taxonomic_resources("GBIF_AU")
+))
+```
+
+## Building a data release
+
+The data releases taxonAlign downloads are built by `data-raw/build_data_release.R`. For every
+dataset, a release holds the source exports exactly as supplied (every column as text), the dataset
+in taxonAlign's format (`<dataset>.parquet`, checked with `taxonAlign::check_taxonomic_reference()`),
+and a `manifest.csv` recording each file's source, retrieval date, row count, checksum, licence and
+citation. taxonAlign only ever downloads the ready files, and learns from the manifest which datasets a
+release has -- so adding a dataset needs a new data release, not a new version of taxonAlign. See the
+script's header for how to run it and publish the result.

@@ -1,0 +1,42 @@
+Package: taxonAlign.dataprep
+Title: Build and Release Taxonomic References for taxonAlign
+Version: 0.0.0.9000
+Authors@R: c(
+    person(given = "Elizabeth", family = "Wenk", role = c("aut", "ctb", "cph"), email = "e.wenk@unsw.edu.au", comment = c(ORCID = "0000-0001-5640-5910")),
+    person(given = "Fonti", family = "Kar", role = c("aut", "cre"), email = "f.kar@unsw.edu.au", comment = c(ORCID = "0000-0002-2760-3974"))
+    )
+Description: Companion to taxonAlign. Turns taxonomic references into the
+  format taxonAlign matches names against: reshapes the Australian National Species
+  List and Australian Faunal Directory exports and the Australian Plant Census, builds
+  references from the GBIF backbone (live, or from taxadb's snapshots), and walks users
+  through mapping their own reference tables onto the format interactively. Also builds
+  the versioned data releases that taxonAlign::load_taxonomic_resources() downloads.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Imports:
+    APCalign,
+    arrow,
+    dplyr,
+    parallel,
+    purrr,
+    readr,
+    rgbif,
+    rlang,
+    stats,
+    stringr,
+    taxonAlign,
+    tools,
+    utils
+Suggests:
+    DBI,
+    duckdb,
+    taxadb,
+    testthat (>= 3.1.9),
+    tibble,
+    withr
+Remotes:
+    traitecoevo/APCalign,
+    traitecoevo/taxonAlign
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0
