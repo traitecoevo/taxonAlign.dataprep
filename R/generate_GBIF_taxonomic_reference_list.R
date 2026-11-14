@@ -2,6 +2,12 @@
 # occurrence records are matched against. Restricting `name_lookup()` calls
 # to this dataset avoids pulling duplicate names from the hundreds of other
 # checklists GBIF indexes.
+#
+# It's also passed as `checklistKey` to every rgbif::name_backbone() and rgbif::occ_search() call:
+# rgbif 3.9.0 made the Catalogue of Life Extended Release (COL XR) their default taxonomy, so without
+# it name_backbone() returns COL XR keys ("TP" for Tracheophyta, not 7707728), which as.integer()
+# turned into NA, and occ_search() reads a key in COL XR's taxonomy. Both functions accept
+# `checklistKey` in rgbif 3.8.5 too, with the same results (traitecoevo/taxonAlign.dataprep#1).
 gbif_backbone_dataset_key <- "d7dddbf4-2cf0-4f39-9b2a-bb099caae36c"
 
 # GBIF's species/name_lookup search endpoint refuses to serve pages past this offset ("Max offset of
@@ -337,7 +343,8 @@ generate_GBIF_taxonomic_reference_list <- function(taxon_name,
 resolve_gbif_taxon <- function(taxon_name, name_rank, name_kingdom) {
   match <- with_gbif_retry(function() {
     rgbif::name_backbone(
-      name = taxon_name, rank = name_rank, kingdom = name_kingdom, verbose = FALSE, curlopts = gbif_curlopts
+      name = taxon_name, rank = name_rank, kingdom = name_kingdom, verbose = FALSE,
+      checklistKey = gbif_backbone_dataset_key, curlopts = gbif_curlopts
     )
   })
 
@@ -372,10 +379,22 @@ resolve_gbif_taxon <- function(taxon_name, name_rank, name_kingdom) {
     )
   }
 
-  key <- as.integer(match$usageKey)
+  usage_key <- match$usageKey
   if (isTRUE(tolower(match$status) == "synonym") && "acceptedUsageKey" %in% names(match) &&
       !is.na(match$acceptedUsageKey)) {
-    key <- as.integer(match$acceptedUsageKey)
+    usage_key <- match$acceptedUsageKey
+  }
+  key <- suppressWarnings(as.integer(usage_key))
+  # a non-numeric key isn't a GBIF Backbone key (e.g. a COL XR key, which is what rgbif >= 3.9.0
+  # returns unless asked for the Backbone); carrying on with NA would query GBIF with no taxon at all
+  if (length(key) != 1 || is.na(key)) {
+    stop(
+      "GBIF matched `taxon_name` = \"", taxon_name, "\" to key \"", paste(usage_key, collapse = ", "),
+      "\", which isn't a GBIF Backbone key. Please report this at ",
+      "https://github.com/traitecoevo/taxonAlign.dataprep/issues, with your rgbif version (",
+      as.character(utils::packageVersion("rgbif")), ").",
+      call. = FALSE
+    )
   }
 
   list(key = key, rank = tolower(match$rank))
@@ -639,6 +658,7 @@ fetch_gbif_country_keys <- function(roots, country, cache_dir,
     occ <- with_gbif_retry(function() {
       rgbif::occ_search(
         taxonKey = root$key,
+        checklistKey = gbif_backbone_dataset_key,
         country = country,
         limit = 0,
         facet = "taxonKey",

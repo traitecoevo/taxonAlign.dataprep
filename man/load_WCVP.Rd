@@ -31,7 +31,7 @@ given), downloading it if there is one, and reshapes the file again. Defaults to
 }
 \value{
 A tibble in taxonAlign's reference format (see \code{\link[taxonAlign:taxonomic_reference_schema]{taxonAlign::taxonomic_reference_schema()}}),
-with \code{taxonomic_dataset = "WCVP"} and a \code{family} column. Its \code{"version"} attribute is the WCVP
+with \code{taxonomic_dataset = "WCVP"} and \code{scientific_name_ID} and \code{family} columns. Its \code{"version"} attribute is the WCVP
 version, and its \code{"citation"} attribute how Kew asks for it to be cited.
 }
 \description{
@@ -47,8 +47,10 @@ Each name in \code{wcvp_names.csv} becomes one record: \code{canonical_name} is 
 (or the record's own ID, for an accepted name or one with no accepted name, such as an unplaced
 name). Statuses keep Kew's labels, in lower case (\code{"accepted"}, \code{"synonym"}, \code{"illegitimate"},
 \code{"invalid"}, \code{"unplaced"}, \code{"misapplied"}, \code{"artificial hybrid"}, \code{"local biotype"}), except
-\code{"Orthographic"}, which becomes \code{"orthographic variant"}. The \code{family} column is kept, so
-taxonAlign adds a family-rank record for each family (WCVP has no family records of its own). The
+\code{"Orthographic"}, which becomes \code{"orthographic variant"}. \code{scientific_name_ID} is the name's IPNI
+LSID (\code{"urn:lsid:ipni.org:names:<ipni_id>"}), \code{NA} for the few names IPNI doesn't have. The \code{family}
+column is kept, so taxonAlign adds a family-rank record for each family (WCVP has no family records
+of its own); its \code{taxon_ID} is \code{"WCVP_family_<family>"}, e.g. \code{"WCVP_family_Myrtaceae"}. The
 2,744 names with no rank in version 16 (infraspecific names written without a rank marker, such as
 \emph{Aquilegia vulgaris inversa}) get the rank \code{"infraspecific name"}. Distribution data
 (\code{wcvp_distribution.csv}) isn't read.

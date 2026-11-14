@@ -15,6 +15,8 @@ test_that("WCVP names become taxonAlign records: statuses, links, ranks, hybrid 
   expect_equal(out$scientific_name[2], "Eucalyptus globulus Labill.")
   expect_true(all(out$taxonomic_dataset == "WCVP"))
   expect_equal(out$family[1], "Myrtaceae")
+  # IPNI ID kept as an LSID (traitecoevo/taxonAlign.dataprep#1)
+  expect_equal(out$scientific_name_ID[c(2, 6)], c("urn:lsid:ipni.org:names:2-1", NA))
 })
 
 test_that("an unknown WCVP status is an error, not silently dropped", {
@@ -25,10 +27,13 @@ test_that("an unknown WCVP status is an error, not silently dropped", {
 
 test_that("load_WCVP reads your own wcvp_names.csv, and the result aligns and updates names", {
   out <- load_WCVP(path = write_sample_wcvp(), cache_dir = withr::local_tempdir(), quiet = TRUE)
-  lookup <- taxonAlign::create_taxonomic_update_lookup(c("Eucalyptus gigantea", "Eucalyptus globulis", "Myrtaceae"), out)
+  lookup <- taxonAlign::create_taxonomic_update_lookup(c("Eucalyptus gigantea", "Eucalyptus globulis", "Myrtaceae"), out, full = TRUE)
   expect_equal(lookup$suggested_name[1:2], c("Eucalyptus globulus", "Eucalyptus globulus"))
-  # WCVP has no family records; taxonAlign adds one from the family column
+  # WCVP has no family records; taxonAlign adds one from the family column, with a name-derived ID
   expect_equal(lookup$taxon_rank[3], "family")
+  expect_equal(lookup$taxon_ID[3], "WCVP_family_Myrtaceae")
+  # ...and the IPNI ID column isn't read as a rank of its own
+  expect_false("scientific_name_ID" %in% names(taxonAlign::prepare_taxonomic_resources(out)))
 })
 
 test_that("a named WCVP version already downloaded is used without going online", {

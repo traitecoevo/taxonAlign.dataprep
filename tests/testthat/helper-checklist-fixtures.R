@@ -21,6 +21,8 @@ sample_wcvp_names_raw <- function() {
   )
   out <- as.data.frame(matrix(NA_character_, nrow(rows), length(cols), dimnames = list(NULL, cols)))
   out[names(rows)] <- rows
+  # IPNI IDs, one name without
+  out$ipni_id <- c("1-1", "2-1", "3-1", "4-1", "5-1", NA, "7-1", "8-1")
   tibble::as_tibble(out)
 }
 

@@ -29,8 +29,10 @@ taxonAlign_WCVP_status <- c(
 #' (or the record's own ID, for an accepted name or one with no accepted name, such as an unplaced
 #' name). Statuses keep Kew's labels, in lower case (`"accepted"`, `"synonym"`, `"illegitimate"`,
 #' `"invalid"`, `"unplaced"`, `"misapplied"`, `"artificial hybrid"`, `"local biotype"`), except
-#' `"Orthographic"`, which becomes `"orthographic variant"`. The `family` column is kept, so
-#' taxonAlign adds a family-rank record for each family (WCVP has no family records of its own). The
+#' `"Orthographic"`, which becomes `"orthographic variant"`. `scientific_name_ID` is the name's IPNI
+#' LSID (`"urn:lsid:ipni.org:names:<ipni_id>"`), `NA` for the few names IPNI doesn't have. The `family`
+#' column is kept, so taxonAlign adds a family-rank record for each family (WCVP has no family records
+#' of its own); its `taxon_ID` is `"WCVP_family_<family>"`, e.g. `"WCVP_family_Myrtaceae"`. The
 #' 2,744 names with no rank in version 16 (infraspecific names written without a rank marker, such as
 #' *Aquilegia vulgaris inversa*) get the rank `"infraspecific name"`. Distribution data
 #' (`wcvp_distribution.csv`) isn't read.
@@ -48,7 +50,7 @@ taxonAlign_WCVP_status <- c(
 #' @param quiet Logical; suppress progress messages. Defaults to `FALSE`.
 #'
 #' @return A tibble in taxonAlign's reference format (see [taxonAlign::taxonomic_reference_schema()]),
-#'  with `taxonomic_dataset = "WCVP"` and a `family` column. Its `"version"` attribute is the WCVP
+#'  with `taxonomic_dataset = "WCVP"` and `scientific_name_ID` and `family` columns. Its `"version"` attribute is the WCVP
 #'  version, and its `"citation"` attribute how Kew asks for it to be cited.
 #'
 #' @examples
@@ -73,7 +75,9 @@ load_WCVP <- function(version = NULL,
     key <- paste0("v", attr(file, "version"))
   }
 
-  cache_file <- file.path(cache_dir, "WCVP", paste0("WCVP_", key, ".rds"))
+  # the "_2" marks the reshaped format: bump it whenever reshape_WCVP() changes, so a result cached in
+  # the old format isn't reused (2: added scientific_name_ID)
+  cache_file <- file.path(cache_dir, "WCVP", paste0("WCVP_", key, "_2.rds"))
   if (!refresh_cache && file.exists(cache_file)) {
     if (!quiet) message("Using cached WCVP reference (", key, ").")
     return(readRDS(cache_file))
@@ -121,6 +125,9 @@ reshape_WCVP <- function(raw) {
     genus = dplyr::na_if(genus, ""),
     taxon_ID = raw$plant_name_id,
     accepted_name_usage_ID = dplyr::coalesce(raw$accepted_plant_name_id, raw$plant_name_id),
+    # the IPNI LSID, as traits.build taxon lists record a name's ID (traitecoevo/taxonAlign.dataprep#1).
+    # Needs taxonAlign >= 0.0.0.9001, which stopped reading scientific_name_ID as a rank
+    scientific_name_ID = ifelse(is.na(raw$ipni_id), NA_character_, paste0("urn:lsid:ipni.org:names:", raw$ipni_id)),
     family = raw$family
   )
 }

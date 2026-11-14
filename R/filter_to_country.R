@@ -185,7 +185,8 @@ fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_
     repeat {
       occ <- with_gbif_retry(function() {
         do.call(rgbif::occ_search, c(
-          list(taxonKey = root$key, country = cc, limit = 0, facet = "scientificName",
+          list(taxonKey = root$key, checklistKey = gbif_backbone_dataset_key, country = cc, limit = 0,
+               facet = "scientificName",
                scientificName.facetLimit = page, scientificName.facetOffset = length(scientific),
                curlopts = gbif_curlopts),
           extra
@@ -195,7 +196,14 @@ fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_
       scientific <- c(scientific, got)
       if (length(got) < page) break
     }
-    if (!quiet && length(scientific) > 0) message("Parsing ", format(length(scientific), big.mark = ","), " names...")
+    if (length(scientific) == 0) {
+      # not cached: an empty result is more likely a failed query than a real absence, and a cached one
+      # would be reused silently from then on (traitecoevo/taxonAlign.dataprep#1)
+      warning("GBIF has no occurrence records in ", cc, " (", root$label, "). Nothing was cached, so the ",
+              "next call asks GBIF again.", call. = FALSE)
+      return(parse_gbif_names(character(0)))
+    }
+    if (!quiet) message("Parsing ", format(length(scientific), big.mark = ","), " names...")
     parsed <- parse_gbif_names(unique(scientific))
     saveRDS(parsed, cache_file)
     parsed

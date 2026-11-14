@@ -28,7 +28,7 @@ Imports:
     rlang,
     stats,
     stringr,
-    taxonAlign,
+    taxonAlign (>= 0.0.0.9001),
     tools,
     utils
 Suggests:

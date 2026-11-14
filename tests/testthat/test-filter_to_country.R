@@ -85,6 +85,39 @@ test_that("several countries combine their names, and extra filters reach GBIF",
   expect_equal(calls$args$basisOfRecord, "PRESERVED_SPECIMEN")
 })
 
+test_that("GBIF is asked for the Backbone taxonomy, whatever rgbif's default", {
+  # rgbif 3.9.0 made COL XR the default: name_backbone("Tracheophyta") returned "TP", which became an
+  # NA key, and the empty result was cached (traitecoevo/taxonAlign.dataprep#1)
+  calls <- local_mock_gbif_names()
+  filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_equal(calls$args$checklistKey, gbif_backbone_dataset_key)
+})
+
+test_that("a key that isn't a Backbone key stops, rather than querying GBIF with no taxon", {
+  calls <- local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    name_backbone = function(...) data.frame(usageKey = "TP", matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED"),
+    .package = "rgbif"
+  )
+  cache <- withr::local_tempdir()
+  expect_error(filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = cache, quiet = TRUE),
+               "isn't a GBIF Backbone key")
+  expect_equal(calls$occ, 0)
+  expect_length(list.files(cache), 0)
+})
+
+test_that("an empty GBIF result warns and isn't cached", {
+  calls <- local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    occ_search = function(...) { calls$occ <- calls$occ + 1; list(facets = list()) },
+    .package = "rgbif"
+  )
+  cache <- withr::local_tempdir()
+  expect_warning(out <- filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = cache, quiet = TRUE),
+                 "no occurrence records in AU")
+  expect_length(list.files(cache, pattern = "^gbif_names_"), 0)
+})
+
 test_that("country must be ISO codes, and the reference in taxonAlign's format", {
   expect_error(filter_to_country(country_test_reference(), "Australia"), "two-letter ISO")
   expect_error(filter_to_country(dplyr::select(country_test_reference(), -genus), "AU"), "missing required column")

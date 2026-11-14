@@ -104,7 +104,7 @@ interactive session), mostly going on through `taxonAlign::prepare_taxonomic_res
 `build_and_prepare()`), using a copy of taxonAlign's `sample_taxonomic_resources()` fixture
 (`helper-align-taxa-fixtures.R`). All offline.
 
-233 expectations, all passing as of the last `devtools::test()` run (2026-10-22), with `taxadb`/`duckdb` installed and network access available (so `gbif_snapshot_url`'s one live test ran too).
+245 expectations, all passing as of the last `devtools::test()` run (2026-11-14), with `taxadb`/`duckdb` installed and network access available (so `gbif_snapshot_url`'s one live test ran too).
 
 Gotcha if you add more end-to-end tests: don't wrap a block of `local_mocked_bindings()` calls in a
 plain helper function and call that helper from inside `test_that()` without forwarding `.env` — the
@@ -311,6 +311,14 @@ backbone taxonomy (`gbif_backbone_dataset_key`), optionally filtered to a countr
 and/or a minimum taxonomic rank (`gbif_rank_order` defines the "this rank and below" ordering).
 
 Key design points worth knowing before touching this file:
+- **rgbif >= 3.9.0 defaults to COL XR, not the GBIF Backbone** (issue #1, 2026-11-14): its
+  `name_backbone()` returns alphanumeric COL XR keys ("TP" for Tracheophyta) and `occ_search()` reads
+  keys in that taxonomy. `as.integer("TP")` was `NA`, so `filter_to_country()` queried GBIF with no taxon
+  and cached an empty result as `gbif_names_NA_<cc>.rds`. Every `name_backbone()`/`occ_search()` call
+  now passes `checklistKey = gbif_backbone_dataset_key` (accepted by 3.8.5 too, same results; checked
+  live under both), `resolve_gbif_taxon()` stops on a non-integer key, and `filter_to_country()` warns
+  and doesn't cache an empty result. `name_lookup()`/`name_usage()` still work on the Backbone under
+  3.9.0 but are deprecated (`name_usage()` warns). Moving the GBIF code to COL XR is an open decision.
 - **Name resolution**: `resolve_gbif_taxon()` calls `rgbif::name_backbone()` once per input name,
   follows synonym links to the accepted usage key, and deliberately errors (rather than silently
   fetching a huge clade) when GBIF returns a `"HIGHERRANK"` match — this happens when `taxon_name` is
