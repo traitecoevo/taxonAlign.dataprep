@@ -33,13 +33,16 @@ load_APC <- function(quiet = FALSE, ...) {
   # `subclass` and `taxon_distribution` are only in APCalign's full `APC` table; APCalign's own lookup
   # reports them, so taxonAlign's should too (traitecoevo/taxonAlign.dataprep#1)
   extra <- APC$APC[, c("taxon_ID", "subclass", "taxon_distribution")]
-  flat |>
+  out <- flat |>
     dplyr::select(-dplyr::any_of(c("subclass", "taxon_distribution"))) |>
     dplyr::left_join(extra[!duplicated(extra$taxon_ID), ], by = "taxon_ID") |>
     # only taxonAlign's columns and APC's rank columns: taxonAlign reads any other character column as
     # a rank, so APC's own metadata (nomInval, parentNameUsageID, nameAccordingTo, license, ...) each
     # became a bogus "taxon" rank
     dplyr::select(dplyr::any_of(c(taxonAlign::taxonomic_reference_schema()$column, taxonAlign_APC_rank_cols)))
+  # APCalign's data version, which taxonAlign records in aligned_reason (when APCalign gives one)
+  attr(out, "version") <- attr(APC, "version", exact = TRUE)
+  out
 }
 
 # APC's columns that are ranks (`genus` is a required column already)

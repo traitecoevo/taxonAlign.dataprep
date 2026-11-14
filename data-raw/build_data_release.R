@@ -35,6 +35,9 @@
 
 suppressMessages(library(dplyr))
 devtools::load_all(".", quiet = TRUE)
+# the NSL exports are tens of MB from a slow server: R's default 60 s download timeout cut the
+# algae export off on 2026-11-14
+options(timeout = max(1800, getOption("timeout")))
 
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 4) stop("usage: build_data_release.R <release_date> <out_dir> <nsl_source> <col_xr_version>")
