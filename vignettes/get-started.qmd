@@ -23,10 +23,9 @@ from a dated data release.
 - reshapes particular sources into taxonAlign's format: the Australian National Species List
   exports, including the Australian Faunal Directory's (`load_NSL()`), the Australian Plant
   Census (`load_APC()`), and two worldwide checklists, the World Checklist of Vascular Plants
-  (`load_WCVP()`) and the Catalogue of Life (`load_CoL()`);
-- builds a reference from the GBIF backbone taxonomy, live (`generate_GBIF_taxonomic_reference_list()`)
-  or from a [taxadb](https://docs.ropensci.org/taxadb/) snapshot
-  (`generate_taxadb_taxonomic_reference_list()`);
+  (`load_WCVP()`) and the Catalogue of Life (`load_CatalogueOfLife()`, including its Extended
+  Release, GBIF's own taxonomy);
+- restricts a worldwide reference to the taxa GBIF has records of in a country (`filter_to_country()`);
 - walks you through turning your own reference tables into the format (`build_taxonomic_reference()`);
 - builds the data releases taxonAlign downloads (`data-raw/build_data_release.R`).
 
@@ -75,56 +74,6 @@ create_taxonomic_update_lookup(c("Xylotoles costatus", "Xylotoles sp. 1"), my_re
 See `?build_taxonomic_reference` for the full set of prompts, and for supplying the answers in a
 script instead.
 
-## From the GBIF backbone taxonomy
-
-`generate_GBIF_taxonomic_reference_list()` builds a reference from the GBIF backbone taxonomy for any
-taxon name, optionally restricted to a country and/or a minimum rank. The whole subtree is fetched
-once and cached, so repeat calls are fast.
-
-```{r}
-aporocera <- generate_GBIF_taxonomic_reference_list("Aporocera", country = "AU")
-create_taxonomic_update_lookup(c("Aporocera viridipennis", "Aporocera viridipenis", "Aporocera sp. 1"), aporocera)
-```
-
-Real GBIF data can include a handful of "doubtful" or incompletely-classified records with no
-canonical name at all (the backbone also holds BOLD Barcode Index Numbers as unranked "taxa", named
-like `"BOLD:AAX6343"`) -- taxonAlign drops these automatically (with a warning), since a name with no
-usable label could never be matched against anyway.
-
-GBIF's occurrence records include fossil specimens, so a `country` filter would otherwise keep fossil
-taxa. Taxa GBIF flags as extinct, and their synonyms, are left out by default
-(`exclude_extinct = TRUE`); that includes recently extinct species (the thylacine is flagged extinct
-too), and `exclude_extinct = FALSE` keeps them, with an `extinct` column. For all Australian animals at
-once, use the released list (`taxonAlign::load_taxonomic_resources("GBIF_AU")`) rather than building
-it live, which takes many hours.
-
-## From taxadb (a pre-cached snapshot of GBIF, ITIS, and others)
-
-`generate_GBIF_taxonomic_reference_list()` fetches live from GBIF's API -- practical for a small
-clade, but slow for a genuinely large one (a phylum, a large class). For a large group,
-`generate_taxadb_taxonomic_reference_list()` instead sources from
-[taxadb](https://docs.ropensci.org/taxadb/)'s own pre-built, locally-cached snapshot -- fast
-regardless of size, at the cost of the snapshot possibly being out of date (check
-`taxadb:::available_versions()` to see how current it is before relying on it for anything
-time-sensitive, or pass `gbif_snapshot_url` to query a current GBIF snapshot directly):
-
-```{r}
-#| eval: false
-# every taxon in the class Insecta that taxadb's GBIF snapshot has
-insecta <- generate_taxadb_taxonomic_reference_list("Insecta", rank = "class", provider = "gbif")
-
-# the same, restricted to taxa with an Australian GBIF occurrence record
-insecta_au <- generate_taxadb_taxonomic_reference_list(
-  "Insecta", rank = "class", provider = "gbif", country = "AU"
-)
-```
-
-Unlike `generate_GBIF_taxonomic_reference_list()`, `rank` here is required -- it tells the function
-which column (`kingdom`/`phylum`/`class`/`order`/`family`/`genus`) to filter on, since taxadb has no
-single "fetch below this name" concept the way a live GBIF fetch does. `taxadb` is only needed for this
-function, so it's a suggested rather than a required dependency: install it with
-`install.packages("taxadb")` if you use it.
-
 ## From the National Species List and the APC
 
 `load_NSL()` reshapes one group's National Species List export -- `"animals"` (the Australian Faunal
@@ -163,7 +112,7 @@ export, with counts, and how it compared with the AFD's own CSV export format.
 ## Worldwide checklists: the WCVP and the Catalogue of Life
 
 `load_WCVP()` loads the World Checklist of Vascular Plants (Royal Botanic Gardens, Kew), every vascular
-plant name worldwide (~1.45 million), and `load_CoL()` the Catalogue of Life, a reference to every
+plant name worldwide (~1.45 million), and `load_CatalogueOfLife()` the Catalogue of Life, a reference to every
 taxon in every kingdom (~5.5 million names), from [ChecklistBank](https://api.checklistbank.org). The first call
 downloads the source (~90MB and ~170MB); both the download and the reshaped table are cached, so every
 later call loads from your computer, offline. Without a version, the first call gets the current WCVP
@@ -186,13 +135,23 @@ attr(wcvp, "citation")
 ```
 
 The Catalogue of Life by a release's ChecklistBank key (`316595` is COL26.10, `310463` the COL25
-annual release) or alias. The default, `"3LR"`, is the latest release;
+annual release) or alias. The default is the latest release;
 `https://api.checklistbank.org/dataset?releasedFrom=3&origin=release` lists them all:
 
 ```{r}
 #| eval: false
-col <- load_CoL(316595)
+col <- load_CatalogueOfLife(316595)
 attr(col, "doi")
+```
+
+`extended = TRUE` loads the Catalogue of Life's Extended Release instead (~8.5 million names): the
+COL plus names integrated from thousands of further checklists. It's GBIF's taxonomy, which replaced
+the GBIF Backbone in October 2026, and what the data releases' `CatalogueOfLife_AU` list is built from:
+
+```{r}
+#| eval: false
+col_xr <- load_CatalogueOfLife(extended = TRUE)   # the latest Extended Release
+col_xr <- load_CatalogueOfLife(316691)            # COL26.10 XR, by its key
 ```
 
 The first load is slow (the COL especially: a ~170MB download and ~5.5 million names to reshape),
@@ -209,7 +168,7 @@ lookup_2 <- create_taxonomic_update_lookup(names_2, col_resources)
 
 Kew's and COL's own statuses are kept (`"illegitimate"`, `"ambiguous synonym"`, ...), except that
 COL's `"provisionally accepted"` names become `"accepted"`, since they're the accepted names of their
-taxa. See `?load_WCVP` and `?load_CoL` for exactly how each is reshaped.
+taxa. See `?load_WCVP` and `?load_CatalogueOfLife` for exactly how each is reshaped.
 
 ## Restricting a worldwide list to a country
 
@@ -241,7 +200,7 @@ search is limited to vascular plants automatically; for others, name the GBIF gr
 
 ```{r}
 #| eval: false
-col_au_nz <- load_CoL() |>
+col_au_nz <- load_CatalogueOfLife(extended = TRUE) |>
   filter_to_country(c("AU", "NZ"), gbif_taxon = c("Animalia", "Plantae", "Fungi"))
 ```
 
@@ -266,7 +225,7 @@ tables: in a list, most preferred first. Released lists can be mixed in too:
 #| eval: false
 resources <- prepare_taxonomic_resources(c(
   list(mine = my_reference, fungi_now = fungi_now),
-  load_taxonomic_resources("GBIF_AU")
+  load_taxonomic_resources("CatalogueOfLife_AU")
 ))
 ```
 

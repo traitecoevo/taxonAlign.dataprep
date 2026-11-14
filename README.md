@@ -49,11 +49,11 @@ pak::pak("traitecoevo/taxonAlign.dataprep")
 | `build_taxonomic_reference()` | Walk through turning your own reference table(s), whatever their column names, into taxonAlign's format, combining several in a chosen priority order. |
 | `load_NSL()` | Reshape an Australian National Species List export -- `"animals"` (the Australian Faunal Directory), `"algae"`, `"bryophytes"`, `"fungi"` or `"lichens"` -- from the verbatim copy in a data release, or from your own download. |
 | `load_APC()` | The Australian Plant Census, via `APCalign::load_taxonomic_resources()`. |
-| `load_CoL()` | The Catalogue of Life, from ChecklistBank: a reference to every taxon in every kingdom -- the latest release, or a named one by its key (`316595` for COL26.10) or alias (`"COL25"`). |
+| `load_CatalogueOfLife()` | The Catalogue of Life, from ChecklistBank: a reference to every taxon in every kingdom -- the latest release, or a named one by its key (`316595` for COL26.10) or alias (`"COL25"`). `extended = TRUE` loads its Extended Release, GBIF's own taxonomy. |
 | `load_WCVP()` | The World Checklist of Vascular Plants (Royal Botanic Gardens, Kew): every vascular plant name worldwide, current or a named version (`version = 16`). |
-| `filter_to_country()` | Restrict any reference -- e.g. the WCVP or COL -- to the taxa GBIF has occurrence records of in one or more countries, linking GBIF's names to the reference's accepted names *or* synonyms. |
-| `generate_GBIF_taxonomic_reference_list()` | Build a reference from the *live* GBIF backbone taxonomy for a taxon (optionally filtered by country and/or minimum rank) -- best for a small clade. |
-| `generate_taxadb_taxonomic_reference_list()` | Build a reference from [taxadb](https://docs.ropensci.org/taxadb/)'s pre-cached snapshot of GBIF, ITIS, or another supported authority -- fast for a large clade. |
+| `filter_to_country()` | Restrict any reference -- e.g. the WCVP or the Catalogue of Life -- to the taxa GBIF has occurrence records of in one or more countries, linking GBIF's names to the reference's accepted names *or* synonyms. |
+
+The GBIF Backbone builders (`generate_GBIF_taxonomic_reference_list()`, `generate_taxadb_taxonomic_reference_list()`) were removed in November 2026, when GBIF replaced its Backbone with the Catalogue of Life Extended Release: `load_CatalogueOfLife(extended = TRUE) |> filter_to_country("AU")` builds the same kind of list from GBIF's current taxonomy.
 
 Every function returns one table in taxonAlign's format, which goes straight into taxonAlign's
 matching functions:
@@ -62,8 +62,8 @@ matching functions:
 library(taxonAlign.dataprep)
 library(taxonAlign)
 
-aporocera <- generate_GBIF_taxonomic_reference_list("Aporocera", country = "AU")
-create_taxonomic_update_lookup(c("Aporocera viridipennis", "Aporocera sp. 1"), aporocera)
+wcvp_au <- load_WCVP() |> filter_to_country("AU")
+create_taxonomic_update_lookup(c("Eucalyptus globulus", "Neo-uvaria sp."), wcvp_au)
 ```
 
 ## Data releases

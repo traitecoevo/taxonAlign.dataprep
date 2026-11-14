@@ -16,8 +16,6 @@ then (don't re-litigate them). Everything here was copied from taxonAlign at com
 history for it before the split is in that repo.
 
 Exported functions, each returning one flat table in taxonAlign's format:
-- `generate_GBIF_taxonomic_reference_list()` -- live GBIF backbone fetch (Architecture #1).
-- `generate_taxadb_taxonomic_reference_list()` -- taxadb snapshot (Architecture #1b).
 - `load_APC()` -- thin `APCalign::load_taxonomic_resources()` wrapper (was
   `taxonAlign::load_taxonomic_resources("APC")`).
 - `load_NSL(taxon_group, path = NULL, version = NULL)` -- an NSL export pair (Architecture #4; was
@@ -35,8 +33,14 @@ Exported functions, each returning one flat table in taxonAlign's format:
   from this repo's first commit, f7e4518); its output on the real 2026 and old AFD exports is
   identical to the pre-split loader's (see "Old vs new comparison" below).
 - `load_WCVP(version = NULL, path = NULL)` -- the World Checklist of Vascular Plants (Kew), and
-  `load_CoL(version = "3LR", path = NULL)` -- the Catalogue of Life from ChecklistBank. Both added
-  2026-10-22 at the user's request; see "Worldwide checklists" below.
+  `load_CatalogueOfLife(version = NULL, extended = FALSE, path = NULL)` -- the Catalogue of Life from
+  ChecklistBank (was `load_CoL()`, renamed 2026-11-14: user wanted it spelled out "so people know").
+  Both added 2026-10-22 at the user's request; see "Worldwide checklists" below.
+- **No GBIF Backbone builders** (`generate_GBIF_taxonomic_reference_list()`,
+  `generate_taxadb_taxonomic_reference_list()`, removed 2026-11-14 -- issue #1, user: "move to CoL"):
+  GBIF replaced its Backbone with the Catalogue of Life Extended Release (rgbif 3.9.0), so
+  `load_CatalogueOfLife(extended = TRUE) |> filter_to_country(...)` is the replacement. See
+  Architecture #1.
 - `filter_to_country(reference, country, gbif_taxon = NULL, ...)` -- restricts any reference (WCVP,
   COL, ...) to taxa GBIF has occurrence records of in one or more countries; see "Country filter" below.
 - `build_taxonomic_reference()` -- the interactive on-ramp (was
@@ -62,10 +66,9 @@ taxonAlign, `devtools::install("../taxonAlign")` before running these tests. `ex
 vendored in `R/utils.R` (taxonAlign keeps it internal); keep it identical to taxonAlign's
 `R/match_taxa_helpers.R` copy.
 
-Imports: `APCalign`, `arrow`, `dplyr`, `parallel` (ships with base R, but called via `::` for the
-concurrent GBIF page fetch), `purrr`, `readr`, `rgbif`, `rlang`, `stats`, `stringr`, `taxonAlign`,
-`tools`, `utils`. Suggests: `taxadb`, `duckdb`, `DBI` (only `generate_taxadb_taxonomic_reference_list()`
-needs them), `testthat`, `tibble`, `withr`.
+Imports: `APCalign`, `arrow`, `curl`, `dplyr`, `jsonlite`, `purrr`, `readr`, `rgbif`, `rlang`,
+`stats`, `stringr`, `taxonAlign (>= 0.0.0.9001)`, `tools`, `utils`. Suggests: `testthat`, `tibble`,
+`withr`. (`parallel`, `taxadb`, `duckdb`, `DBI` went with the GBIF Backbone builders.)
 
 The default cache dir is deliberately still `tools::R_user_dir("taxonAlign", "cache")` -- the same as
 taxonAlign's, so the large, resumable GBIF fetch cache already built there keeps working.
@@ -78,22 +81,8 @@ vs NSL format comparison script (`../taxonAlign/ignore/AFD_export_comparison.R`)
 
 ### Testing
 
-`tests/testthat/test-generate_GBIF_taxonomic_reference_list.R` covers `generate_GBIF_taxonomic_reference_list()`
-and its internal helpers (`resolve_gbif_taxon()`, `fetch_gbif_taxon_tree()`, `fetch_gbif_country_keys()`,
-`recycle_against_taxon_name()`, `cache_is_fresh()`) end to end, entirely offline: every `rgbif::` call
-(`name_backbone`, `name_lookup`, `name_usage`, `occ_search`) is replaced with
-`testthat::local_mocked_bindings(..., .package = "rgbif")`, with fixture builders in
-`tests/testthat/helper-gbif-fixtures.R`.
-
-`tests/testthat/test-generate_taxadb_taxonomic_reference_list.R` covers
-`generate_taxadb_taxonomic_reference_list()`, also entirely offline -- the core reshape/filter tests
-run against real data via `taxadb`'s own tiny bundled `"itis_test"` fixture, and the one
-`country`-filtering test (`provider = "gbif"`) mocks `taxadb::td_create()`/`taxadb::taxa_tbl()`
-alongside `rgbif::name_backbone()`/`rgbif::occ_search()`. Skipped if `taxadb` isn't installed.
-`gbif_snapshot_url` (issue #23, see Architecture #1b) is covered both offline -- mocking the internal
-`gbif_snapshot_tbl()` directly, plus a small local parquet file for the missing-column schema-check
-error -- and with one real, live test against the actual source.coop URL, gated with
-`skip_if_offline()`/`skip_on_cran()`.
+`test-filter_to_country.R` covers `filter_to_country()` and `resolve_gbif_taxon()` offline, every
+`rgbif::` call mocked with `testthat::local_mocked_bindings(..., .package = "rgbif")`.
 
 `test-load_NSL.R` covers `load_NSL()` against two hand-built NSL taxon/names fixture pairs (`helper-nsl-fixtures.R`) --
 one plant-side camelCase-CSV, one animals pipe-delimited snake_case -- plus reading a release's
@@ -104,7 +93,7 @@ interactive session), mostly going on through `taxonAlign::prepare_taxonomic_res
 `build_and_prepare()`), using a copy of taxonAlign's `sample_taxonomic_resources()` fixture
 (`helper-align-taxa-fixtures.R`). All offline.
 
-245 expectations, all passing as of the last `devtools::test()` run (2026-11-14), with `taxadb`/`duckdb` installed and network access available (so `gbif_snapshot_url`'s one live test ran too).
+172 expectations, all passing as of the last `devtools::test()` run (2026-11-14), all offline (the removed GBIF/taxadb builders took ~90 with them).
 
 Gotcha if you add more end-to-end tests: don't wrap a block of `local_mocked_bindings()` calls in a
 plain helper function and call that helper from inside `test_that()` without forwarding `.env` — the
@@ -182,7 +171,7 @@ meaning this function:
   `prompt_column_or_fixed_value()` path as the other two rather than keeping a separate, more limited
   mechanism — this also retired `prompt_free_text()` entirely (it had no other caller).
 
-## Worldwide checklists — `R/load_WCVP.R`, `R/load_CoL.R` (exported: `load_WCVP()`, `load_CoL()`)
+## Worldwide checklists — `R/load_WCVP.R`, `R/load_CatalogueOfLife.R` (exported: `load_WCVP()`, `load_CatalogueOfLife()`)
 
 Both download their source directly (like `load_APC()`, not via a taxonAlign data release), cache the
 download *and* the reshaped `.rds` under `<cache_dir>/WCVP/` and `<cache_dir>/CoL/`, can be pinned, and
@@ -233,6 +222,11 @@ returned -- any other character column would be scanned as a hierarchy column by
   alias already cached never goes online; a release's zip, once downloaded, is never downloaded again
   (releases don't change). Offline with nothing usable cached: `"3LR"` -> the newest cached release,
   other aliases looked up in the cache, else a clear error.
+- **The Extended Release comes as a flat table, not ColDP** (2026-11-14): ChecklistBank's
+  `export.zip?format=ColDP` for COL26.10 XR (key 316691; 137MB zip) holds `dataset-316691.tsv` (1.5GB,
+  same `col:` columns plus the classification, no `extinct`), not `NameUsage.tsv`; `CoL_name_table()`
+  reads whichever is there. `load_CatalogueOfLife(extended = TRUE)` = alias `"3LXR"`, tracked in
+  `latest_XR.rds` apart from `"3LR"`'s `latest.rds`.
 - **Slow first time, by design**: COL26.10's first `load_CoL()` took ~23 min here (download slowed by
   other jobs; ~3 min alone) plus reshaping 5.5M names; a cached load ~20 s (reading the .rds). Both print
   a "slow the first time" message (user's wording, 2026-10-22) only when nothing is cached. Aligning 10
@@ -244,7 +238,7 @@ returned -- any other character column would be scanned as a hierarchy column by
   update_taxa() silently takes the first (`Halocynthia`). A genus synonym leading to several accepted
   genera gets no split/ambiguity flag (splits handling is species-synonyms-only, by the user's choice) --
   a taxonAlign question, raised with the user, not changed.
-- Tests: `test-load_WCVP.R`, `test-load_CoL.R` against `helper-checklist-fixtures.R` (each source's own
+- Tests: `test-load_WCVP.R`, `test-load_CatalogueOfLife.R` against `helper-checklist-fixtures.R` (each source's own
   raw layout), network mocked.
 
 ## Country filter — `R/filter_to_country.R` (exported: `filter_to_country()`)
@@ -254,6 +248,28 @@ occurrences, accepting that the taxonomies don't match -- a GBIF name recorded i
 the reference's accepted name *or* a synonym; either way the reference's accepted name is kept, with
 all of its synonyms. Deliberately *not* via WCVP's own TDWG distribution data or COL's patchy
 distribution data (the user stopped that line of investigation): GBIF works the same for any reference.
+- **GBIF's taxonomy is COL XR** (2026-11-14, issue #1): every query names `checklistKey =
+  gbif_COL_XR_checklist_key`; names come back as the XR writes them. Cached as
+  `gbif_names_COLXR_<key>_<cc>[_<hash of ...>][_nofossil].rds` -- old Backbone-era caches (no `COLXR`)
+  are never reused. The names used are returned as `attr(x, "gbif_names")` (the release stores them).
+- **Unranked names are kept only if recorded** (2026-11-14): `country_filter_records()` used to count
+  any one-word, non-genus name as "above genus" (kept whole), so all 2.17M of the COL XR's `"unranked"`
+  barcode clusters were kept whatever the country (2.8M of 8.5M records for AU animals). Ranks
+  `"unranked"`/`"other"`/`"no rank"`/NA now count only if GBIF has records of them.
+- **Validated 2026-11-14 on COL26.10 XR** (`load_CatalogueOfLife(316691)`: 8,504,545 names in 2.6 min,
+  passes `check_taxonomic_reference()`): AU Animalia -> 220,416 GBIF names after 1,406 fossil-only ones,
+  630,158 records kept (253k accepted, 366k synonym; 369k species, 132k genus -- 81k of them synonyms --
+  and every family worldwide, by the "above genus kept whole" design), 119,777 of 124,696 species-level
+  GBIF names matched; passes the check; 0 barcode clusters left after the fix above. Fossil exclusion is
+  by `basisOfRecord`, so it's partial: genus *Diprotodon* stays (some of its records aren't labelled
+  FOSSIL_SPECIMEN). The reporter's case: WCVP v16 for MY/BN/SG keeps 192,227 records (192,196 on the
+  Backbone under rgbif 3.8.5).
+- **`exclude_fossils = TRUE`** (2026-11-14): replaces `GBIF_AU`'s extinct flag, which the XR doesn't
+  have. A second facet query on `basisOfRecord = "FOSSIL_SPECIMEN"`; a name whose total record count is
+  no more than its fossil count is dropped (*Diprotodon*), one with any non-fossil record stays (the
+  thylacine). Skipped when `...` has its own `basisOfRecord`. rgbif turns a vector `basisOfRecord` into
+  separate queries (a list of results), hence the count comparison rather than one filtered query.
+
 - **Names, not keys**: one `rgbif::occ_search(facet = "scientificName", scientificName.facetLimit =
   1e5, facetOffset paging)` per country (per `gbif_taxon` root) returns the names occurrences are
   identified to, with authorship (56,825 for AU Tracheophyta, one request) -- no backbone tree needed,
@@ -303,308 +319,26 @@ format.)
 
 ## Architecture
 
-### 1. GBIF-backed reference list builder — `R/generate_GBIF_taxonomic_reference_list.R` (active, exported)
+### 1. GBIF: the Backbone builders (removed) and COL XR — `R/gbif_helpers.R`
 
-This is the one fully-built, documented, exported piece of the package.
-`generate_GBIF_taxonomic_reference_list(taxon_name, ...)` builds a tibble of taxa sourced from the GBIF
-backbone taxonomy (`gbif_backbone_dataset_key`), optionally filtered to a country's occurrence records
-and/or a minimum taxonomic rank (`gbif_rank_order` defines the "this rank and below" ordering).
+`generate_GBIF_taxonomic_reference_list()` (live GBIF Backbone fetch: name resolution, recursive
+paginated `name_lookup()` tree fetch split by children past GBIF's 100,000-offset limit, a country
+filter via an occurrence `taxonKey` facet, extinct flags) and `generate_taxadb_taxonomic_reference_list()`
+(taxadb's GBIF/ITIS snapshots, and issue #23's `gbif_snapshot_url` for the 2026 GBIF snapshot) were
+**removed 2026-11-14** (issue #1). rgbif 3.9.0 (CRAN 2026-10-05) made the Catalogue of Life Extended
+Release (COL XR, checklist `7ddf754f-d193-4cc9-b351-99906754a03b`) its default taxonomy; GBIF calls the
+Backbone out of date, and `name_lookup()`/`name_usage()` are deprecated. The user chose to replace them
+with the Catalogue of Life, spelled out in names. Their code, tests and the long design notes (incl. the
+multi-day 2026-08 Australia fetch and BOLD BIN handling) are in git history before that date.
 
-Key design points worth knowing before touching this file:
-- **rgbif >= 3.9.0 defaults to COL XR, not the GBIF Backbone** (issue #1, 2026-11-14): its
-  `name_backbone()` returns alphanumeric COL XR keys ("TP" for Tracheophyta) and `occ_search()` reads
-  keys in that taxonomy. `as.integer("TP")` was `NA`, so `filter_to_country()` queried GBIF with no taxon
-  and cached an empty result as `gbif_names_NA_<cc>.rds`. Every `name_backbone()`/`occ_search()` call
-  now passes `checklistKey = gbif_backbone_dataset_key` (accepted by 3.8.5 too, same results; checked
-  live under both), `resolve_gbif_taxon()` stops on a non-integer key, and `filter_to_country()` warns
-  and doesn't cache an empty result. `name_lookup()`/`name_usage()` still work on the Backbone under
-  3.9.0 but are deprecated (`name_usage()` warns). Moving the GBIF code to COL XR is an open decision.
-- **Name resolution**: `resolve_gbif_taxon()` calls `rgbif::name_backbone()` once per input name,
-  follows synonym links to the accepted usage key, and deliberately errors (rather than silently
-  fetching a huge clade) when GBIF returns a `"HIGHERRANK"` match — this happens when `taxon_name` is
-  an unresolved homonym (e.g. a genus name shared by a plant and an unrelated animal) and GBIF backs
-  off to their common ancestor.
-- **Bulk fetch + disk cache**: `fetch_gbif_taxon_tree()` pages through `rgbif::name_lookup()` (1000
-  rows/page) instead of one API call per taxon, and caches the combined result per root GBIF key under
-  `cache_dir` (default: `tools::R_user_dir("taxonAlign", "cache")`). Cache freshness is time-based
-  (`cache_is_fresh()`, `max_cache_age_days`); `refresh_cache = TRUE` forces a re-download. A second,
-  independent size guard (`max_taxa`, default 50000; override with `force_large_fetch = TRUE`) protects
-  against a homonym resolving broader than intended and triggering a very large/slow first fetch.
-- **Country filtering**: `fetch_gbif_country_keys()` does one `rgbif::occ_search()` facet query per
-  requested root taxon (not per descendant) to keep this cheap, and is cached the same way. `country`
-  is validated as a 2-letter ISO 3166-1 alpha-2 code (regex `^[A-Za-z]{2}$`) up front -- a country
-  *name* like `"Australia"` used to pass straight through to `rgbif::occ_search()`, which doesn't
-  recognise it, silently returning a 0×0 facet result rather than erroring; accessing that result's
-  `$name` then triggered an "Unknown or uninitialised column" warning and a silently-empty reference
-  list rather than a clear error. `occ$facets$taxonKey$name` is also now guarded with
-  `"name" %in% names(...)` rather than just `!is.null(...)`, since an empty facet result is *not*
-  `NULL` (it's a valid 0-row/0-column tibble).
-- Final output columns are a fixed, renamed subset of the raw GBIF fields (see the function's
-  `@return` doc), named to match [APCalign](https://traitecoevo.github.io/APCalign/)'s taxonomic
-  resource tables wherever an equivalent concept exists there (`taxon_ID`, `accepted_name_usage_ID`,
-  `scientific_name`, `scientific_name_authorship`, `canonical_name`, `taxon_rank`, `taxonomic_status`,
-  `taxonomic_dataset`) so a GBIF-derived reference list can eventually sit alongside an APC/APNI one —
-  with `taxonomic_dataset` hardcoded to `"GBIF"`. `accepted_name_usage_ID` is filled in even for
-  already-accepted rows (self-referential, pointing at their own `taxon_ID`), matching the convention
-  used in real APC downloads, rather than left `NA` the way GBIF's own `acceptedKey` field is. This
-  file only knows about GBIF; combining *multiple* taxonomic references (the package's stated goal #1)
-  is not yet implemented here.
-- `gbif_rank_order` (broadest-to-narrowest rank list used for `rank`-filtering) doesn't cover every
-  value in GBIF's real `Rank` enum — e.g. `infraspecific_name`, `supragenericname`, `infragenus` are
-  missing. A taxon actually carrying one of those ranks would silently drop out of `rank`-filtered
-  output rather than being included. Flagged but not fixed (deliberately) — pin down GBIF's exact
-  ordinal placement for the missing ranks before adding them, rather than guessing.
-- **`country` can't narrow the fetch itself, only filter it afterwards** — found worth documenting
-  explicitly after being asked directly whether the AU-occurrence filter could run *before* the
-  (often much larger) full-tree download, to skip fetching taxa that don't even occur in the target
-  country. It can't: GBIF's taxonomy-browsing endpoint (`name_lookup()`, what the tree fetch uses) has
-  no country concept at all — only the *occurrence-record* endpoint (`occ_search()`, what
-  `fetch_gbif_country_keys()` already uses) does, and occurrence records are normally tagged with a
-  taxon's *accepted* usage, essentially never a synonym's own key. Filtering to occurrence-derived keys
-  before fetching the tree would silently drop every synonym of an in-country taxon (a synonym itself
-  has no occurrence records of its own to be found by). A tempting-looking alternative — use the
-  (cheap) occurrence facet to get just the in-country *accepted* keys first, then fetch full detail
-  (including synonyms) only for those via `rgbif::name_usage()` — was checked against real numbers
-  before being ruled out too: AU-occurring Insecta alone has 105,178 distinct occurrence taxonKeys, and
-  `name_usage()` doesn't accept more than one `key` at a time (confirmed: errors if you try) — that's
-  105,178+ individual API calls, dramatically *more* than the ~1,800 calls (at 1000 rows/page) needed to
-  page the whole global Insecta tree once. Fetching the whole tree first, then filtering, remains the
-  right design; the genuine speedup opportunity is in how that full-tree fetch itself is paged (next
-  bullet).
-- **The full-tree fetch is paged concurrently, not one page at a time** — `parallel_requests` (default
-  4) controls how many of `fetch_gbif_taxon_tree()`'s paginated `rgbif::name_lookup()` calls run at
-  once, via `parallel::mclapply()` (fork-based, so Unix-alike only -- silently falls back to sequential
-  on Windows, never incorrect, just not faster there). Chosen over adding a new async-HTTP dependency,
-  since `rgbif::name_lookup()` itself has no batching/async option to hook into, and over the
-  country-first alternative above. For a large clade (a GBIF-scale invertebrate phylum can mean
-  thousands of 1000-row pages) this is where nearly all the wall-clock time goes, so this is a
-  meaningful, not cosmetic, speedup — confirmed in practice fetching AU-occurring Arthropoda (2.17M
-  global descendants, ~3,100 pages). Each page is retried up to 3 times with a short backoff
-  (`fetch_page_with_retry()`) before being treated as a real failure — found necessary in the same
-  real fetch: a single page occasionally fails with a transient network/TLS error (e.g. "LibreSSL
-  SSL_read... bad decrypt") unrelated to the request itself, and without a retry this would fail the
-  *entire* multi-thousand-page tree fetch (see the no-silent-partial-data check below) even after every
-  other page already succeeded — wasteful to have to redo a very large, slow fetch from scratch over
-  one flaky page. `parallel::mclapply()`'s own child-error handling is deliberately not relied on
-  directly: each page is wrapped in its own `try()` inside `fetch_page_with_retry()` rather than letting
-  a raw error propagate out of the forked worker, since `mclapply()` additionally emits its own
-  "scheduled core N encountered error" warning for an uncaught child error, which would otherwise
-  surface confusingly alongside (and before) this function's own clearer error message. If any page
-  still fails after retries, the whole tree fetch errors clearly, naming how many of how many pages
-  were lost — matching this package's existing "clear error over silent partial data" convention (e.g.
-  the `country`-code / `canonical_name`-NA checks elsewhere in the package) — rather than silently
-  returning an incomplete tree with no indication anything went wrong.
-- **Every rgbif call gets an explicit timeout, and (outside the paginated-page path) a shared retry
-  wrapper** (`gbif_curlopts`, `with_gbif_retry()`) -- found necessary after `fetch_page_with_retry()`
-  alone still wasn't enough: a request occasionally *hangs* rather than erroring (observed directly on
-  the real Arthropoda fetch -- worker processes sitting at ~0% CPU for 30+ minutes, no error, no
-  further log output), and a hang can never trigger a retry, since a retry only runs after a request
-  actually *fails*. `gbif_curlopts` (`timeout = 60`, passed to every `rgbif::name_backbone()`/
-  `name_lookup()`/`name_usage()`/`occ_search()` call in the file via `curlopts`) turns a hang into an
-  ordinary, retry-able error after the timeout (120s -- raised from an initial 60s after direct
-  measurement showed GBIF's own deep-pagination legitimately taking up to 78s at high offsets under
-  concurrent load; see `gbif_curlopts`'s own comment). `with_gbif_retry()` is the non-paginated sibling
-  of `fetch_page_with_retry()` -- same retry-with-backoff policy, but raises on exhaustion instead of
-  returning a try-error, since name resolution/root-usage/children-page/occurrence-facet calls have no
-  cross-call aggregation to report into. Takes a zero-argument thunk (`function() ...`), not a bare
-  expression -- an R promise argument is only ever evaluated once and its value cached, so a bare
-  expression would silently *not* re-run the real network call on a second attempt. The very first
-  `name_lookup()` call in `fetch_gbif_taxon_tree()` (the one that fetches `total`, deciding whether the
-  clade needs splitting at all) was initially missed and left completely unwrapped -- found the hard
-  way when it alone took down an entire ~5,400-children-deep recursive Insecta fetch on one transient
-  failure, with no chance to retry. Now wrapped in `with_gbif_retry()` like everything else.
-- **A clade bigger than 100,000 descendants can't be paged at all** — confirmed directly against the
-  raw GBIF REST API (not just `rgbif`'s wrapper): `name_lookup()`'s underlying endpoint hard-refuses any
-  page whose offset exceeds 100,000 (`"Max offset of 100000 exceeded."`), a fixed server-side limit, not
-  a rate-limit or something retries fix. Found in practice fetching Arthropoda (~3.1M descendants,
-  ~3,100 pages) and Mollusca (~484k, ~485 pages) — both fail once paging passes page 100, regardless of
-  `parallel_requests` or `fetch_page_with_retry()`. `gbif_max_lookup_offset` (100000) is the threshold
-  `fetch_gbif_taxon_tree()` checks `total` against; above it, the direct-paging path is skipped entirely
-  in favour of `fetch_gbif_taxon_tree_by_children()`.
-  - **Recursive split-into-children**: `fetch_gbif_taxon_tree_by_children()` fetches `root_key`'s
-    immediate children (`fetch_gbif_taxon_children()`, paginated the same way via
-    `rgbif::name_usage(key, data = "children")` — its `meta` has no `count` field, only `endOfRecords`,
-    so it pages until that flag is set rather than computing a page count up front) and recurses into
-    `fetch_gbif_taxon_tree()` for each one. A child can itself still be too large and need splitting
-    again — every taxon's children are smaller than the taxon itself, so this always terminates, but a
-    `.depth` guard (6 levels) errors clearly rather than trusting that invariant blindly forever, in case
-    some corner of the backbone violates it. Children are fetched **sequentially, not in parallel**:
-    each child's own fetch already parallelises across *its* pages internally (`parallel_requests`), and
-    nesting `mclapply()` inside `mclapply()` would oversubscribe cores (e.g. 4 children × 4 pages each =
-    16-way contention on what might be a 4-8 core machine) for no real benefit.
-  - **This makes a huge fetch resumable for free, which matters a lot in practice for a fetch that can
-    run for a long time unattended** (Arthropoda's full breakdown took multiple long-running sessions,
-    including surviving a machine reboot partway through) — every recursive call caches its own result
-    under its own GBIF key exactly like a directly-fetched tree, so there's no separate checkpointing
-    mechanism to build or that can get out of sync: the disk cache *is* the checkpoint. Interrupted
-    partway through fetching, say, 30 orders under a class, re-running the exact same top-level call
-    later only re-fetches whichever orders aren't already cached — already-completed ones return
-    instantly from `cache_is_fresh()`.
-  - **A full-backbone bulk download exists as an alternative and was deliberately not used**
-    (`https://hosted-datasets.gbif.org/datasets/backbone/current/backbone.zip`, confirmed via a direct
-    HTTP HEAD request: ~971MB compressed, last modified over a year before this was investigated) — it
-    would sidestep the offset limit entirely, but using it only for the huge clades would leave the
-    combined reference with silently inconsistent currency (small phyla live/current via the API, huge
-    ones years stale from a bulk snapshot) — a worse problem for a taxonomic alignment tool than being
-    slower but uniformly live. Also a materially bigger architectural change (a new file-based ingestion
-    path covering every kingdom, not a fetch scoped to one taxon) rather than a fix to the existing
-    fetch. Worth reconsidering only if GBIF's API limits become more restrictive still.
-
-### 1b. taxadb-backed reference list builder — `R/generate_taxadb_taxonomic_reference_list.R` (active, exported)
-
-Companion to the function above, for the case that function's own docs now explicitly say it's *not*
-suited to: a genuinely large clade (a phylum, a large class). Sources from
-[taxadb](https://docs.ropensci.org/taxadb/) (rOpenSci) — a package that already downloads and locally
-caches versioned, pre-built snapshots of several major taxonomic authorities (`gbif`, `itis`, `col`,
-`ncbi`, `ott`, `iucn`, and some less-actively-maintained ones — see `taxadb::td_create()`'s own docs
-for the current list), backed by DuckDB + parquet. Filtering to a taxon group (`generate_taxadb_taxonomic_reference_list(taxon_name, rank, provider)`)
-is then an ordinary local database query regardless of how large the group is — no pagination limit,
-no recursive splitting, no retry/timeout engineering needed, at the cost of the snapshot being up to a
-few months stale rather than live (taxadb's own docs: snapshots are semi-annual). Investigated and
-implemented per [issue #19](https://github.com/traitecoevo/taxonAlign/issues/19).
-
-- **Measured, not just theorised, how close taxadb's GBIF snapshot actually is to a live fetch --
-  and the first-pass explanation for the gap found was wrong.** Ran both
-  `generate_GBIF_taxonomic_reference_list()` (this session's own, independently-fetched AU
-  invertebrate reference, 358,496 rows across 28 phyla) and `generate_taxadb_taxonomic_reference_list()`
-  (the same 28 phyla, `provider = "gbif"`, `country = "AU"`) and compared exact GBIF usageKeys (both
-  sources use the same raw key -- ours bare, taxadb's `"GBIF:<key>"`-prefixed, so this is a precise
-  key-set comparison, not just a name comparison). Result: **85.2% agreement overall (Jaccard),
-  93.0% restricted to accepted names only** -- emphatically not "near perfect", and rightly challenged
-  as such rather than accepted at face value.
-  - **First hypothesis (wrong, but checked rather than assumed): duplicate/reassigned GBIF backbone
-    keys for the same name.** A real, known GBIF quirk -- confirmed a handful of real cases (e.g.
-    `"Nephthyidae"`/`"Ambo"` appearing on *both* "only in one side" lists under different keys) -- but
-    only ~2-6% of the mismatches, not the main driver.
-  - **Second hypothesis (also wrong): taxadb's GBIF provider has inherently thinner synonym
-    coverage than the live API.** This is what got written up and reported *before* the actual root
-    cause was found -- a real mistake, caught only because the resulting numbers were challenged
-    directly rather than accepted as "a reasonable-sounding trade-off". Investigating *why* named
-    records were missing (not just counting them) led to the real answer:
-  - **Actual root cause: taxadb's cached "gbif" snapshot is stuck at version `"22.12"`
-    (December 2022)** -- confirmed directly via `taxadb:::latest_version()` (returns `"22.12"`) and
-    `taxadb:::available_versions()` (returns `"22.12"` for *every* provider it lists, not just
-    `"gbif"` -- the whole package's underlying data pipeline appears to have stopped publishing new
-    snapshots around that date, not something scoped to one provider). At the time this was measured
-    (2026), that's roughly **four years stale**, not the "semi-annual" cadence taxadb's own
-    `data-sources` vignette claims. Four years of new species descriptions, added synonyms, and
-    backbone reclassifications for an actively-studied group like invertebrates plausibly explains a
-    gap this size on its own, without needing "taxadb's methodology is less complete" as an
-    explanation at all.
-  - One phylum, `"Entoprocta"`, has zero rows under that exact name in taxadb's snapshot at all --
-    plausibly a downstream symptom of the same staleness (a classification change since Dec 2022) or a
-    genuine flattening difference; not separately resolved. Negligible in scale (78 rows in the live
-    fetch either way).
-  - **Practical implication, corrected**: don't recommend `generate_taxadb_taxonomic_reference_list()`
-    as a reliably-current alternative to a live fetch right now -- its usefulness depends entirely on
-    whether taxadb's maintainers resume publishing snapshots, which is outside this package's control.
-    It may still be the right tool when a somewhat-stale worldwide slice is an acceptable trade for
-    speed/reliability on a huge clade, but that trade-off is now known to be "up to ~4 years stale",
-    not "up to a few months" -- say so plainly wherever this function is recommended, and don't soften
-    it into a smaller-sounding caveat next time real numbers look wrong. Worth periodically re-checking
-    `taxadb:::available_versions()` in case this changes.
-  - **The raw ~15% dataset-level gap and the *practical* impact on a real alignment are two different
-    numbers, and both are worth reporting together.** Ran the real, full AusInvertTraits name list
-    (5,154 names) through `create_taxonomic_update_lookup()` twice -- `AFD + our own live-fetched
-    GBIF` vs. `AFD + the taxadb-sourced equivalent`, same 28 phyla -- and compared `aligned_name`
-    directly, not just raw usageKeys. Result: **5,143/5,154 (99.79%) identical; only 11 names
-    differ**, and all 11 are cleanly explained by the same staleness cause, never the reverse (taxadb
-    never resolved something the live fetch didn't): two species (`"Onthophagus bulga"`,
-    `"Trioza melaleucae"`) and two genera (`"Austrocardiophorus"`, `"Trachytetra"`, the latter across
-    6 rows) that the live fetch has and taxadb's snapshot doesn't. This isn't a contradiction of the
-    85.2%/93.0% figures above -- it reconciles cleanly: AFD is checked first and resolves the large
-    majority of names on its own, so only a small residual set of names ever reaches GBIF at all, and
-    only a fraction of *that* residual happens to fall inside taxadb's specific staleness gap. Don't
-    report the raw dataset-level comparison alone as "how bad is taxadb" without also checking what it
-    actually costs on a real alignment task -- they can (and here do) tell very different stories.
-
-- **`country` filtering is still GBIF-API-only**, not something `taxadb` can supply for *any*
-  provider — `taxadb` has no occurrence data at all, only taxonomic backbone data. So `country` is
-  only accepted when `provider = "gbif"`, and even then it's answered by reusing
-  `resolve_gbif_taxon()`/`fetch_gbif_country_keys()` (the exact same internal helpers
-  `generate_GBIF_taxonomic_reference_list()` already uses for its own `country` argument) rather than
-  duplicating that logic — one small, live GBIF API call to resolve `taxon_name`'s key and one
-  occurrence-facet query, on top of the otherwise-fully-local taxadb query.
-- **A real bug found in `taxadb::filter_rank()` while investigating this (confirmed directly, not
-  assumed from docs)**: `rank = "order"` throws a genuine DuckDB parser error
-  (`"Parser Error: syntax error at or near \"order\""`) — `order` is a reserved SQL keyword, and
-  `filter_rank()`'s internals build a raw `WHERE` clause without quoting the column name. Every other
-  rank (`kingdom`/`phylum`/`class`/`family`/`genus`) works fine; only `order` collides. Not reported
-  upstream yet. Worked around here by not depending on `filter_rank()` at all — this function queries
-  `taxadb::taxa_tbl(provider)` directly via an ordinary `dplyr::filter()`, which goes through
-  `dbplyr`'s own identifier-quoting and doesn't hit the bug, confirmed working for `"order"` too.
-- **taxadb's schema has no separate authorship field** — confirmed against its own `taxonID`/
-  `scientificName`/`acceptedNameUsageID`/... Darwin Core schema (identical across every provider,
-  the whole point of `taxadb`'s normalisation) and directly against real data (`taxadb`'s own tiny
-  bundled `itis_test` fixture, used for this package's own offline tests). `scientific_name` and
-  `canonical_name` are therefore identical in this function's output, unlike
-  `generate_GBIF_taxonomic_reference_list()`'s, where `scientific_name` includes authorship.
-- **`taxonID`/`acceptedNameUsageID` are `"<PROVIDER>:<integer>"`-prefixed strings** (e.g.
-  `"GBIF:2440935"`), confirmed against `taxadb`'s `data-sources` vignette and real `itis_test` data --
-  `strip_taxadb_gbif_prefix()` strips this specifically for the `country`-filtering step, which needs
-  the bare GBIF usageKey to compare against `fetch_gbif_country_keys()`'s result and to pass to
-  `resolve_gbif_taxon()`'s underlying `rgbif` calls. The final output keeps the prefixed string form
-  as `taxon_ID` (consistent with `taxadb`'s own convention, and harmless for combining with other
-  sources since `prepare_taxonomic_resources()` already normalises `taxon_ID` to character regardless
-  of the source column's type).
-- **Investigated, and deliberately not (yet) used, as a way to shrink or replace this package's own
-  bespoke GBIF pagination engineering**: `taxadb`'s own `gbif` snapshot could in principle make much of
-  `fetch_gbif_taxon_tree_by_children()`'s recursive-splitting logic unnecessary for large clades, since
-  the whole point is that `taxadb` already did that heavy lifting once, centrally, rather than every
-  user re-paginating GBIF's live API themselves. This is *why* `generate_taxadb_taxonomic_reference_list()`
-  exists as a genuine alternative, not a niche extra option — but `generate_GBIF_taxonomic_reference_list()`
-  itself is deliberately left as-is (not rewritten to use `taxadb` internally) since it's still the
-  right tool for a small clade needing a live, up-to-the-moment fetch, and this session's own real,
-  independently-fetched worldwide GBIF invertebrate reference (Architecture #1's own numbers) remains
-  useful precisely *because* it was fetched independently — a live cross-check against `taxadb`'s
-  snapshot, not a redundant duplicate of it.
-- **`taxadb` is a `Suggests`, not an `Imports`, dependency** — this function is the only thing in the
-  package that needs it, guarded by an explicit `requireNamespace()` check with an install hint, so a
-  user who never calls this function never needs to install `taxadb` (and its own heavier dependency,
-  DuckDB) at all.
-- **`gbif_snapshot_url` (issue #23, implemented): bypasses `taxadb`'s own frozen registry entirely for
-  `provider = "gbif"`.** Following up directly with the maintainer (`cboettig`) on
-  [ropensci/taxadb#123](https://github.com/ropensci/taxadb/issues/123) turned up something actionable:
-  current-year GBIF snapshots are uploaded as raw Darwin-Core parquet files to `source.coop` well
-  before they're wired into `taxadb`'s own `td_create()`/`taxa_tbl()` registry (which stays frozen at
-  `"22.12"`, confirmed again directly via that registry's own GitHub commit history — one commit,
-  2022-12-20, unchanged — even after the maintainer reported updating "his underlying files"; that
-  update is real, but it's the source.coop parquet, not the R package's registry). `gbif_snapshot_url`,
-  when supplied, queries that parquet URL directly instead — confirmed against real names known
-  missing from the frozen `"22.12"` snapshot (`"Trachytetra"` + 5 species, `"Onthophagus bulga"`,
-  `"Trioza melaleucae"`, `"Austrocardiophorus"`): all four now resolve via this path.
-  - `gbif_snapshot_tbl()` (`@noRd`) does the actual work: opens/reuses `taxadb::td_connect()`'s own
-    cached `duckdb` connection (an *exported* function -- deliberately not `taxadb:::duckdb_view()`,
-    to avoid depending on an internal implementation detail that could change without notice and the
-    `R CMD check` NOTE a `:::` call to another package triggers), creates a `CREATE VIEW IF NOT
-    EXISTS` over the URL via `read_parquet()` (httpfs auto-installs/loads for an http(s) path in
-    current DuckDB, but installed explicitly here too rather than relying on that default), and
-    returns an ordinary lazy `dplyr::tbl()` -- so every downstream step in
-    `generate_taxadb_taxonomic_reference_list()` (rank filtering, `include_synonyms`, `country`
-    filtering, the final `transmute()`) works completely unchanged regardless of which source fed it.
-    View names are keyed by a short hash of the URL so two different snapshot URLs used in the same
-    session don't collide.
-  - **Schema stability here isn't a guarantee `taxadb` itself is making** -- the maintainer's own
-    caveat when confirming the upload ("I haven't had a chance to update the taxadb bindings
-    themselves or verify we don't have breaking changes") -- so `gbif_snapshot_tbl()` explicitly checks
-    the expected columns (`taxonAlign_gbif_snapshot_required_cols`) are present and errors clearly,
-    naming what's missing, rather than failing confusingly deep inside the final `transmute()` if a
-    future snapshot's schema drifts. A column being *renamed* rather than dropped could still slip
-    through undetected -- not fully guarded against.
-  - Deliberately **opt-in, not the default** -- passing nothing still uses `taxadb`'s own (stale)
-    registry, unchanged from before this was added. `country` filtering, rank filtering (including the
-    `order`-reserved-keyword case, confirmed unaffected -- `rank = "order"` against the real 2026
-    snapshot returns 767,547 rows via ordinary `dplyr::filter()`), and `include_synonyms` all work
-    identically whether the source is `taxadb`'s registry or a direct snapshot URL.
-  - `duckdb`/`DBI` added to `DESCRIPTION`'s `Suggests` (both already transitive dependencies of
-    `taxadb` itself, so no new install burden for anyone who already uses this function).
-  - Test coverage: mocks `gbif_snapshot_tbl()` directly (a same-package internal function, so no
-    `.package =` needed) to prove the bypass-taxadb assertion and exercise the full reshape pipeline
-    offline; a small local parquet file written via `duckdb`'s own `COPY ... TO ... (FORMAT PARQUET)`
-    covers the missing-column schema-check error, also offline; one real, live test against the actual
-    source.coop URL (skipped unless online/not on CRAN, same gating `test-apc_equivalence.R` uses for
-    its own live external dependency) confirms `"Trachytetra"` resolves for real, not just against a
-    mock.
+What survives, in `R/gbif_helpers.R`, is what `filter_to_country()` uses: `gbif_COL_XR_checklist_key`,
+`gbif_curlopts`, `with_gbif_retry()`, and `resolve_gbif_taxon()` -- `rgbif::name_backbone()` with
+`checklistKey` = COL XR (passed explicitly so rgbif 3.8.5, which defaults to the Backbone, gives the
+same keys; verified live under both), alphanumeric keys kept as character ("TP" Tracheophyta,
+"N" Animalia), a synonym followed via `acceptedUsageKey`, and errors on `"NONE"` (homonyms come back
+this way, with a `note`) and `"HIGHERRANK"` matches rather than filtering on a whole kingdom. The bug
+that started this (issue #1): under 3.9.0 the old code's `as.integer("TP")` was `NA`, the facet query
+ran with no taxon, and the empty result was cached as `gbif_names_NA_<cc>.rds`.
 
 ### 3. Known-source reference loaders — `R/load_APC.R` (exported: `load_APC()`); the AFD-format reader now lives in `vignettes/AFD-data-processing.qmd`'s appendix
 
@@ -948,6 +682,13 @@ registry if that starts to feel like the wrong split in practice.
 The download/caching half of this section (versions, offline fallback, `load_taxonomic_resources()`)
 stayed in taxonAlign -- see its CLAUDE.md #5. Pre-split notes follow the post-split summary.
 
+**From 2026-11-14** the last argument is `<col_xr_version>` (a ChecklistBank key, e.g. 316691 = COL26.10
+XR): the script builds `CatalogueOfLife_AU` (`load_CatalogueOfLife(<key>) |> filter_to_country("AU",
+gbif_taxon = "Animalia", refresh_cache = TRUE)`) in place of `GBIF_AU`, and stores
+`gbif_au_animalia_names.parquet` (`attr(x, "gbif_names")`: the names GBIF had Australian animal records
+of) as its raw file -- the XR itself stays citable by DOI on ChecklistBank, but the occurrence name
+list changes daily. The XR has no extinct flag, so `CatalogueOfLife_AU` has no `extinct` column.
+
 **Post-split layout (2026-10-22).** `Rscript data-raw/build_data_release.R <date> <out_dir> <nsl_source> <gbif_au_rds>...`
 (run from this package's root; it `devtools::load_all()`s). For each NSL group it writes the raw
 `nsl_<group>_{taxon,names}.parquet` (verbatim) and then the ready `NSL_<group>.parquet` (via `load_NSL()`
@@ -1000,6 +741,8 @@ often doesn't change for long periods).
   keys from `ignore/gbif_vertebrates_worldwide.rds`) -- the first attempt, paging all of Chordata, was
   hopelessly slow (GBIF deep paging). Vertebrates therefore only have TRUE/NA. Combined table:
   `ignore/gbif_au_animals_with_extinct.rds` (419,088 records; 20,244 extinct).
+- **Superseded 2026-11-14:** `GBIF_AU` is replaced by `CatalogueOfLife_AU` from the next release
+  (Architecture #1; `<gbif_au_rds>` became `<col_xr_version>`), so the note below no longer applies.
 - **Next GBIF_AU rebuild: try the 2026 GBIF snapshot first** (user, 2026-10-22: "I'll forget!").
   `generate_taxadb_taxonomic_reference_list("Animalia", rank = "kingdom", country = "AU",
   gbif_snapshot_url = "https://data.source.coop/cboettig/taxadb/2026/dwc_gbif_part_0.parquet",

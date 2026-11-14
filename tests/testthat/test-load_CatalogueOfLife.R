@@ -1,10 +1,10 @@
-# load_CoL(): reshaping a COL-shaped (ColDP NameUsage.tsv) fixture into taxonAlign's format, and
+# load_CatalogueOfLife(): reshaping a COL-shaped (ColDP NameUsage.tsv) fixture into taxonAlign's format, and
 # which release gets used (ChecklistBank mocked) -- offline.
 
 test_that("COL names become taxonAlign records: synonyms lead to their accepted name", {
   raw <- sample_col_usage_raw()
   names(raw) <- sub("^col:", "", names(raw))
-  out <- reshape_CoL(raw)
+  out <- reshape_CatalogueOfLife(raw)
   expect_silent(taxonAlign::check_taxonomic_reference(out))
   # provisionally accepted names are COL's accepted names
   expect_equal(out$taxonomic_status, c(rep("accepted", 5), "synonym", "accepted", "ambiguous synonym", "accepted"))
@@ -17,10 +17,13 @@ test_that("COL names become taxonAlign records: synonyms lead to their accepted 
   expect_equal(out$taxon_rank[9], "section")
   expect_equal(out$genus[1:2], c(NA_character_, NA_character_))
   expect_equal(out$scientific_name[5], "Vanessa cardui (Linnaeus, 1758)")
+  expect_true(all(out$taxonomic_dataset == "CatalogueOfLife"))
+  # COL's extinct flag, as a logical
+  expect_equal(out$extinct, c(NA, NA, NA, NA, FALSE, NA, TRUE, NA, NA))
 })
 
-test_that("load_CoL reads your own NameUsage.tsv, and the result aligns and updates names", {
-  col <- load_CoL(path = write_sample_col_tsv(), cache_dir = withr::local_tempdir(), quiet = TRUE)
+test_that("load_CatalogueOfLife reads your own NameUsage.tsv, and the result aligns and updates names", {
+  col <- load_CatalogueOfLife(path = write_sample_col_tsv(), cache_dir = withr::local_tempdir(), quiet = TRUE)
   lookup <- taxonAlign::create_taxonomic_update_lookup(c("Cynthia cardui", "Pyrameis novus", "Vanessa (Cynthia)"), col)
   expect_equal(lookup$suggested_name, c("Vanessa cardui", "Vanessa novus", "Vanessa (Cynthia)"))
   expect_equal(lookup$taxon_rank[3], "subgenus")
@@ -60,6 +63,32 @@ test_that("after the first lookup, the latest release (\"3LR\") is used from the
   expect_equal(calls, 2)
 })
 
+test_that("the latest Extended Release (\"3LXR\") is tracked apart from the latest release", {
+  cache <- withr::local_tempdir()
+  json <- function(key, alias) sprintf('{"key": %s, "sourceKey": 3, "alias": "%s", "title": "Catalogue of Life", "issued": "2026-10-16"}', key, alias)
+  local_mocked_bindings(try_fetch = function(url, ...) {
+    list(content = charToRaw(if (grepl("3LXR", url)) json(316691, "COL26.10 XR") else json(316595, "COL26.10")))
+  })
+  expect_equal(CoL_release_metadata("3LXR", cache, TRUE)$key, "316691")
+  expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
+  local_mocked_bindings(try_fetch = function(...) stop("network used"))
+  expect_equal(CoL_release_metadata("3LXR", cache, TRUE)$key, "316691")
+  expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
+  # offline with nothing recorded as latest, "3LXR" is the newest XR already downloaded
+  file.remove(file.path(cache, "CoL", "latest_XR.rds"))
+  local_mocked_bindings(try_fetch = function(...) NULL)
+  expect_equal(CoL_release_metadata("3LXR", cache, TRUE)$key, "316691")
+})
+
+test_that("extended = TRUE asks for the latest Extended Release", {
+  asked <- NULL
+  local_mocked_bindings(CoL_release_metadata = function(version, ...) { asked <<- version; stop("stop here") })
+  expect_error(load_CatalogueOfLife(extended = TRUE, cache_dir = withr::local_tempdir(), quiet = TRUE), "stop here")
+  expect_equal(asked, "3LXR")
+  expect_error(load_CatalogueOfLife(cache_dir = withr::local_tempdir(), quiet = TRUE), "stop here")
+  expect_equal(asked, "3LR")
+})
+
 test_that("a ChecklistBank dataset that isn't a COL release is refused", {
   local_mocked_bindings(try_fetch = function(...) list(content = charToRaw('{"key": 1000, "sourceKey": null, "title": "Some other checklist"}')))
   expect_error(CoL_release_metadata(1000, withr::local_tempdir(), TRUE), "isn't a Catalogue of Life release")
@@ -85,8 +114,8 @@ test_that("the first load of a release warns that it's slow; a cached one doesn'
           file.path(cache, "CoL", "316595", "metadata.rds"))
   tsv <- write_sample_col_tsv()
   withr::with_dir(dirname(tsv), utils::zip(file.path(cache, "CoL", "316595", "coldp.zip"), "NameUsage.tsv", flags = "-q"))
-  expect_message(load_CoL(316595, cache_dir = cache), "slow the first time you load it")
-  expect_no_message(load_CoL(316595, cache_dir = cache, quiet = TRUE))
-  msgs <- testthat::capture_messages(load_CoL(316595, cache_dir = cache))
+  expect_message(load_CatalogueOfLife(316595, cache_dir = cache), "slow the first time you load it")
+  expect_no_message(load_CatalogueOfLife(316595, cache_dir = cache, quiet = TRUE))
+  msgs <- testthat::capture_messages(load_CatalogueOfLife(316595, cache_dir = cache))
   expect_false(any(grepl("slow the first time", msgs)))
 })

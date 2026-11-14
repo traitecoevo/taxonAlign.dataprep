@@ -9,7 +9,7 @@
 #   two packages -- so taxonAlign itself never needs the reshaping code.
 #
 # Run from this package's root:
-#   Rscript data-raw/build_data_release.R <release_date> <out_dir> <nsl_source> <gbif_au_rds>...
+#   Rscript data-raw/build_data_release.R <release_date> <out_dir> <nsl_source> <col_xr_version>
 #
 # <nsl_source> is either
 # - a directory holding the AFD's NSL-format export (the animals taxon/names files, supplied directly
@@ -18,23 +18,30 @@
 #   `manifest.csv`: every NSL group is then rebuilt from those, unchanged (to rebuild the ready files
 #   without re-fetching anything).
 #
-# e.g.
-#   Rscript data-raw/build_data_release.R 2026-10-07 data-raw/release/2026-10-07 \
-#     data-raw/sources/AFD_NSL_export_20260929 data-raw/sources/gbif_au_animals_with_extinct.rds
+# <col_xr_version> is the Catalogue of Life Extended Release to build CatalogueOfLife_AU from, as a
+# ChecklistBank key (e.g. 316691 = COL26.10 XR) or alias.
 #
-# GBIF: the August 2026 GBIF Australia lists, built with generate_GBIF_taxonomic_reference_list(
-# country = "AU"), all taxa kept with GBIF's `extinct` flag as a column (taxonAlign leaves extinct
-# taxa out unless asked). Already in taxonAlign's format, so the ready file is the only file.
+# e.g.
+#   Rscript data-raw/build_data_release.R 2026-11-14 data-raw/release/2026-11-14 \
+#     data-raw/sources/AFD_NSL_export_20260929 316691
+#
+# CatalogueOfLife_AU replaces the 2026-10-07 release's GBIF_AU (built from the GBIF Backbone, which GBIF
+# replaced with the Catalogue of Life Extended Release in October 2026 -- traitecoevo/
+# taxonAlign.dataprep#1): the XR's animal names that GBIF has occurrence records of in Australia (via
+# filter_to_country()), with their synonyms. The XR itself stays available, unchanged, from ChecklistBank
+# by its DOI, so it isn't stored here; the list of names GBIF had records of in Australia when the
+# release was built changes with every new occurrence record, so that's stored verbatim as the raw file.
+# The XR has no extinct flag.
 
 suppressMessages(library(dplyr))
 devtools::load_all(".", quiet = TRUE)
 
 args <- commandArgs(trailingOnly = TRUE)
-if (length(args) < 4) stop("usage: build_data_release.R <release_date> <out_dir> <nsl_source> <gbif_au_rds>...")
+if (length(args) != 4) stop("usage: build_data_release.R <release_date> <out_dir> <nsl_source> <col_xr_version>")
 release <- args[1]
 out_dir <- path.expand(args[2])
 nsl_source <- args[3]
-gbif_files <- args[-(1:3)]
+col_xr_version <- args[4]
 stopifnot(grepl("^\\d{4}-\\d{2}-\\d{2}$", release))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -144,25 +151,40 @@ for (g in nsl_groups$group) {
   )
 }
 
-# ---- GBIF Australia, animals --------------------------------------------------------------------------
-gbif <- bind_rows(lapply(gbif_files, readRDS))
-stopifnot("extinct" %in% names(gbif))
-# Records with no canonical name can never be matched, and taxonAlign drops them (with a warning) on
-# every load. Almost all are BOLD Barcode Index Numbers, which the GBIF backbone holds as "unranked"
-# taxa named e.g. "BOLD:AAX6343" (47,787 of the 47,797 in the August 2026 lists), so they're left out
-# of the ready file instead.
-no_name <- is.na(gbif$canonical_name) | gbif$canonical_name == ""
-message("GBIF_AU: leaving out ", format(sum(no_name), big.mark = ","), " records with no canonical name (",
-        format(sum(no_name & grepl("^BOLD:", gbif$scientific_name)), big.mark = ","), " of them BOLD BINs)")
+# ---- Catalogue of Life Extended Release, Australian animals --------------------------------------------
+col_xr <- load_CatalogueOfLife(col_xr_version)
+col_au <- filter_to_country(col_xr, "AU", gbif_taxon = "Animalia", refresh_cache = TRUE)
+xr_label <- paste0(attr(col_xr, "version"), " (ChecklistBank key ", attr(col_xr, "key"), ", https://doi.org/", attr(col_xr, "doi"), ")")
+# Barcode clusters aren't taxon names: the XR holds BOLD Barcode Index Numbers ("BOLD:AAX6343") and UNITE
+# species hypotheses ("SH1234567.10FU") as "unranked" names (2.17 million in COL26.10 XR). Left out, as
+# BOLD BINs were from GBIF_AU: two BINs one character apart would fuzzy-match each other.
+barcode <- col_au$taxon_rank %in% "unranked" & grepl("^(BOLD:|SH\\d+\\.\\d+FU$)", col_au$canonical_name)
+message("CatalogueOfLife_AU: leaving out ", format(sum(barcode), big.mark = ","), " barcode clusters (BOLD BINs, UNITE SHs)")
+col_au_ready <- col_au[!barcode, ]
+# whatever a kept record leads to must still be there
+stopifnot(all(col_au_ready$accepted_name_usage_ID %in% col_au_ready$taxon_ID))
+add_asset(
+  "gbif_au_animalia_names.parquet", attr(col_au, "gbif_names"), NA_character_, "raw",
+  source = paste0("GBIF occurrence search: every name (scientificName facet, in GBIF's taxonomy, ",
+                  "Catalogue of Life Extended Release) of Animalia records in Australia, as GBIF writes it ",
+                  "and as GBIF's name parser parses it"),
+  source_file = "https://api.gbif.org/v1/occurrence/search?country=AU&facet=scientificName",
+  retrieved = today, licence = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)",
+  citation = paste0("GBIF.org (", today, ") occurrence records of Animalia in Australia, GBIF Occurrence Search ",
+                    "https://www.gbif.org/occurrence/search?country=AU&taxon_key=N"),
+  source_md5 = NA_character_
+)
 add_ready_asset(
-  gbif[!no_name, ], "GBIF_AU",
-  source = paste0("GBIF Backbone Taxonomy, animal taxa with occurrence records in Australia plus their synonyms, ",
-                  "with GBIF's extinct flag. Built with taxonAlign.dataprep::generate_GBIF_taxonomic_reference_list(country = \"AU\"); ",
-                  format(sum(no_name), big.mark = ","), " records with no canonical name (BOLD Barcode Index Numbers) left out"),
-  source_file = paste(basename(gbif_files), collapse = "; "),
-  retrieved = "2026-08 (GBIF backbone and occurrence records accessed via the GBIF API, August 2026)",
-  licence = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)",
-  citation = "GBIF Secretariat. GBIF Backbone Taxonomy. Checklist dataset https://doi.org/10.15468/39omei accessed via GBIF.org, August 2026."
+  col_au_ready, "CatalogueOfLife_AU",
+  source = paste0("Catalogue of Life Extended Release ", xr_label, ", animal names GBIF has occurrence ",
+                  "records of in Australia (gbif_au_animalia_names.parquet) with their accepted names and ",
+                  "synonyms. Built with taxonAlign.dataprep::load_CatalogueOfLife() |> filter_to_country(\"AU\", ",
+                  "gbif_taxon = \"Animalia\"), names known only from fossil specimens and ",
+                  format(sum(barcode), big.mark = ","), " barcode clusters (BOLD BINs) left out"),
+  source_file = paste0("https://api.checklistbank.org/dataset/", attr(col_xr, "key"), "/export.zip?format=ColDP; ",
+                       "gbif_au_animalia_names.parquet"),
+  retrieved = today, licence = "CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)",
+  citation = attr(col_xr, "citation"), source_md5 = NA_character_
 )
 
 manifest <- bind_rows(manifest)
@@ -173,10 +195,11 @@ notes <- c(
   sprintf("taxonAlign data release %s.", release), "",
   paste0(
     "Load these datasets with `taxonAlign::load_taxonomic_resources()`, e.g. ",
-    "`load_taxonomic_resources(c(\"NSL_animals\", \"GBIF_AU\"), version = \"", release, "\")`. ",
+    "`load_taxonomic_resources(c(\"NSL_animals\", \"CatalogueOfLife_AU\"), version = \"", release, "\")`. ",
     "Each `<dataset>.parquet` file is the dataset in taxonAlign's reference format; the ",
     "`nsl_<group>_taxon`/`nsl_<group>_names` files are the National Species List exports it was built ",
-    "from, stored verbatim (every column as text). `manifest.csv` records each file's source, retrieval ",
+    "from, stored verbatim (every column as text), and `gbif_au_animalia_names` the names GBIF had ",
+    "Australian animal records of, which `CatalogueOfLife_AU` was filtered to. `manifest.csv` records each file's source, retrieval ",
     "date, row count, source-file checksum, licence and citation."
   ), "",
   "| Dataset | Rows | Source | Retrieved |", "|---|---|---|---|",

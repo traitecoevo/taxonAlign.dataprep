@@ -11,6 +11,7 @@ filter_to_country(
   gbif_taxon_rank = NULL,
   gbif_kingdom = NULL,
   whole_species = TRUE,
+  exclude_fossils = TRUE,
   refresh_cache = FALSE,
   cache_dir = tools::R_user_dir("taxonAlign", "cache"),
   quiet = FALSE,
@@ -19,7 +20,7 @@ filter_to_country(
 }
 \arguments{
 \item{reference}{A taxonomic reference in taxonAlign's format (see
-\code{\link[taxonAlign:taxonomic_reference_schema]{taxonAlign::taxonomic_reference_schema()}}), e.g. from \code{\link[=load_WCVP]{load_WCVP()}} or \code{\link[=load_CoL]{load_CoL()}}.}
+\code{\link[taxonAlign:taxonomic_reference_schema]{taxonAlign::taxonomic_reference_schema()}}), e.g. from \code{\link[=load_WCVP]{load_WCVP()}} or \code{\link[=load_CatalogueOfLife]{load_CatalogueOfLife()}}.}
 
 \item{country}{One or more two-letter ISO 3166-1 country codes, e.g. \code{"AU"} or \code{c("AU", "NZ")}.}
 
@@ -28,10 +29,13 @@ filter_to_country(
 otherwise every occurrence record in the country is used.}
 
 \item{gbif_taxon_rank, gbif_kingdom}{Optional rank and kingdom for \code{gbif_taxon}, to disambiguate a
-homonym (see \code{\link[=generate_GBIF_taxonomic_reference_list]{generate_GBIF_taxonomic_reference_list()}}).}
+homonym in GBIF's taxonomy (e.g. \code{gbif_kingdom = "Plantae"} for the plant genus \emph{Eremophila}).}
 
 \item{whole_species}{Logical; keep every infraspecific taxon of a kept species, and the species of
 a kept infraspecific taxon. Defaults to \code{TRUE}.}
+
+\item{exclude_fossils}{Logical; leave out names whose GBIF records in the country are all fossil
+specimens. Defaults to \code{TRUE}. Not applied when \code{...} includes a \code{basisOfRecord} filter.}
 
 \item{refresh_cache}{Logical; if \code{TRUE}, fetches the GBIF names again. Defaults to \code{FALSE}.}
 
@@ -44,17 +48,19 @@ a kept infraspecific taxon. Defaults to \code{TRUE}.}
 }
 \value{
 \code{reference}, with only the kept records (and its attributes, such as \code{"version"} and
-\code{"citation"}). Attributes added: \code{"country"}, and \code{"unmatched"} -- a tibble of the GBIF names
-recorded in the country, at species rank or below, that matched nothing in the reference (worth a
-look: names the reference lacks, or spells differently).
+\code{"citation"}). Attributes added: \code{"country"}; \code{"gbif_names"}, a tibble of every name GBIF has
+records of in the country (\code{scientific_name} as GBIF writes it, \code{canonical_name} as parsed), the
+list the filter was based on; and \code{"unmatched"}, those of them at species rank or below that
+matched nothing in the reference (worth a look: names the reference lacks, or spells differently).
 }
 \description{
 Keeps only the taxa of a taxonomic reference -- typically a worldwide one, such as \code{\link[=load_WCVP]{load_WCVP()}} or
-\code{\link[=load_CoL]{load_CoL()}} -- that GBIF has occurrence records of in one or more countries.
+\code{\link[=load_CatalogueOfLife]{load_CatalogueOfLife()}} -- that GBIF has occurrence records of in one or more countries.
 }
 \details{
-The names GBIF's occurrence records in the country are identified to (fetched in a single facet
-query per country, then parsed to canonical names by GBIF's name parser) are matched to the
+The names GBIF's occurrence records in the country are identified to, in GBIF's taxonomy (the
+Catalogue of Life Extended Release; fetched in a single facet query per country, then parsed to
+canonical names by GBIF's name parser), are matched to the
 reference's names, ignoring rank markers, punctuation and case. A GBIF name can match either an
 accepted name or a synonym in the reference, since the two taxonomies needn't agree; either way, the
 matched record's \emph{accepted} name is kept, together with every synonym of it, so old names in a list
@@ -64,15 +70,17 @@ records under that name. Genera (and subgenera) of the kept taxa are kept, with 
 above genus are kept whole, as they don't limit which species can match.
 
 GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
-for animals, fossils; pass further occurrence filters through \code{...} (e.g.
-\code{basisOfRecord = "PRESERVED_SPECIMEN"}) to narrow them. The GBIF names are downloaded once per
+for animals, fossils. A name known only from fossil specimens (\emph{Diprotodon}, say) is left out by
+default (\code{exclude_fossils}), since it would otherwise produce spurious matches against modern names;
+a recently extinct species with museum specimens (the thylacine) stays. Pass further occurrence
+filters through \code{...} (e.g. \code{basisOfRecord = "PRESERVED_SPECIMEN"}) to narrow them. The GBIF names are downloaded once per
 country and group and cached, like \code{\link[=load_WCVP]{load_WCVP()}}: later calls use the cached names, until
 \code{refresh_cache = TRUE}.
 }
 \examples{
 \dontrun{
 wcvp_au <- load_WCVP() |> filter_to_country("AU")
-col_au_nz <- load_CoL() |>
+col_au_nz <- load_CatalogueOfLife(extended = TRUE) |>
   filter_to_country(c("AU", "NZ"), gbif_taxon = c("Animalia", "Plantae", "Fungi"))
 }
 

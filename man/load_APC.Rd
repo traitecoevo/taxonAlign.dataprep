@@ -18,5 +18,6 @@ A tibble in taxonAlign's reference format (see \code{\link[taxonAlign:taxonomic_
 \description{
 A thin wrapper around \code{\link[APCalign:load_taxonomic_resources]{APCalign::load_taxonomic_resources()}}: combines APCalign's accepted, synonym,
 genus and family tables into one table in taxonAlign's reference format, ready for
-\code{\link[taxonAlign:prepare_taxonomic_resources]{taxonAlign::prepare_taxonomic_resources()}}.
+\code{\link[taxonAlign:prepare_taxonomic_resources]{taxonAlign::prepare_taxonomic_resources()}}, with each record's \code{subclass} and \code{taxon_distribution}
+from APCalign's full APC table (so the lookup reports them, as APCalign's does).
 }

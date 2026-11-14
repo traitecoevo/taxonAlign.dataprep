@@ -1,5 +1,5 @@
 # Small WCVP- and COL-shaped fixtures, in each source's own raw layout (column names and value
-# vocabularies checked against WCVP version 16 and COL26.10), for test-load_WCVP.R/test-load_CoL.R.
+# vocabularies checked against WCVP version 16 and COL26.10), for test-load_WCVP.R/test-load_CatalogueOfLife.R.
 
 sample_wcvp_names_raw <- function() {
   cols <- c("plant_name_id", "ipni_id", "taxon_rank", "taxon_status", "family", "genus_hybrid", "genus",
@@ -48,7 +48,9 @@ sample_col_usage_raw <- function() {
     "S3", "G1", "provisionally accepted", "species", "Vanessa novus", "Smith, 2020",
     "S4", "S3", "ambiguous synonym", "species", "Pyrameis novus", "Smith, 1900",
     "SC1", "G1", "accepted", "section botany", "Vanessa sect. Testa", NA
-  )
+  ) |>
+    # COL's extinct flag, on two records
+    dplyr::mutate(`col:extinct` = c(NA, NA, NA, NA, "false", NA, "true", NA, NA))
 }
 
 write_sample_col_tsv <- function(dir = withr::local_tempdir(.local_envir = parent.frame())) {

@@ -8,10 +8,11 @@ Authors@R: c(
 Description: Companion to taxonAlign. Turns taxonomic references into the
   format taxonAlign matches names against: reshapes the Australian National Species
   List exports (including the Australian Faunal Directory's), the Australian Plant
-  Census, the World Checklist of Vascular Plants and the Catalogue of Life, builds
-  references from the GBIF backbone (live, or from taxadb's snapshots), and walks users
-  through mapping their own reference tables onto the format interactively. Also builds
-  the versioned data releases that taxonAlign::load_taxonomic_resources() downloads.
+  Census, the World Checklist of Vascular Plants and the Catalogue of Life (including
+  its Extended Release, GBIF's taxonomy), restricts a worldwide reference to the taxa
+  GBIF has records of in a country, and walks users through mapping their own
+  reference tables onto the format interactively. Also builds the versioned data
+  releases that taxonAlign::load_taxonomic_resources() downloads.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -21,7 +22,6 @@ Imports:
     curl,
     dplyr,
     jsonlite,
-    parallel,
     purrr,
     readr,
     rgbif,
@@ -32,9 +32,6 @@ Imports:
     tools,
     utils
 Suggests:
-    DBI,
-    duckdb,
-    taxadb,
     testthat (>= 3.1.9),
     tibble,
     withr

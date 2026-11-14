@@ -96,7 +96,7 @@ build_taxonomic_reference <- function(taxonomic_resources = NULL, user_responses
   }
 
   # character IDs on each table *before* combining -- bind_rows() errors outright on a type mismatch
-  # (e.g. generate_GBIF_taxonomic_reference_list()'s integer taxon_ID vs. AFD's UUID strings)
+  # (e.g. a table with integer taxon_IDs, such as GBIF Backbone keys, vs. AFD's UUID strings)
   resolved <- purrr::map(resolved, function(tbl) {
     dplyr::mutate(tbl, taxon_ID = as.character(taxon_ID), accepted_name_usage_ID = as.character(accepted_name_usage_ID))
   })
@@ -210,15 +210,15 @@ prompt_for_table_path <- function(prompt_text, user_response = NULL) {
 # The special "is this table already fully aligned?" gate asked once per table, before the per-field
 # prompt sequence, when the automatic column_rename step didn't resolve everything on its own --
 # e.g. the table may already be in taxonAlign's target shape (from an earlier
-# build_taxonomic_reference()/generate_GBIF_taxonomic_reference_list() call) just under column names
+# build_taxonomic_reference() call, or a loader such as load_CatalogueOfLife()) just under column names
 # column_rename doesn't recognise. `user_response`, if supplied, is a plain logical.
 prompt_already_aligned <- function(table_label, user_response = NULL) {
   prompt_yes_no(
     title = sprintf(
       paste0(
         "\n`%s` is missing some of the columns taxonAlign expects by name. Is it already fully ",
-        "aligned regardless (e.g. produced by an earlier `build_taxonomic_reference()` or ",
-        "`generate_GBIF_taxonomic_reference_list()` call, just under different column names)?"
+        "aligned regardless (e.g. produced by an earlier `build_taxonomic_reference()` call or a ",
+        "loader such as `load_CatalogueOfLife()`, just under different column names)?"
       ),
       table_label
     ),

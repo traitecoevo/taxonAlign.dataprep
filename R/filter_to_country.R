@@ -1,4 +1,4 @@
-# Restricting a worldwide reference (WCVP, COL, ...) to the taxa recorded in one or more countries,
+# Restricting a worldwide reference (WCVP, Catalogue of Life, ...) to the taxa recorded in one or more countries,
 # using GBIF occurrence records -- the user's design (2026-10-22): the names GBIF has records of in the
 # country are linked to the reference's own records, whichever of its names they match (accepted or
 # synonym), and each linked record's accepted name is kept, together with all of its synonyms. The
@@ -12,10 +12,11 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' Restrict a reference to the taxa recorded in a country
 #'
 #' Keeps only the taxa of a taxonomic reference -- typically a worldwide one, such as [load_WCVP()] or
-#' [load_CoL()] -- that GBIF has occurrence records of in one or more countries.
+#' [load_CatalogueOfLife()] -- that GBIF has occurrence records of in one or more countries.
 #'
-#' The names GBIF's occurrence records in the country are identified to (fetched in a single facet
-#' query per country, then parsed to canonical names by GBIF's name parser) are matched to the
+#' The names GBIF's occurrence records in the country are identified to, in GBIF's taxonomy (the
+#' Catalogue of Life Extended Release; fetched in a single facet query per country, then parsed to
+#' canonical names by GBIF's name parser), are matched to the
 #' reference's names, ignoring rank markers, punctuation and case. A GBIF name can match either an
 #' accepted name or a synonym in the reference, since the two taxonomies needn't agree; either way, the
 #' matched record's *accepted* name is kept, together with every synonym of it, so old names in a list
@@ -25,21 +26,25 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' above genus are kept whole, as they don't limit which species can match.
 #'
 #' GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
-#' for animals, fossils; pass further occurrence filters through `...` (e.g.
-#' `basisOfRecord = "PRESERVED_SPECIMEN"`) to narrow them. The GBIF names are downloaded once per
+#' for animals, fossils. A name known only from fossil specimens (*Diprotodon*, say) is left out by
+#' default (`exclude_fossils`), since it would otherwise produce spurious matches against modern names;
+#' a recently extinct species with museum specimens (the thylacine) stays. Pass further occurrence
+#' filters through `...` (e.g. `basisOfRecord = "PRESERVED_SPECIMEN"`) to narrow them. The GBIF names are downloaded once per
 #' country and group and cached, like [load_WCVP()]: later calls use the cached names, until
 #' `refresh_cache = TRUE`.
 #'
 #' @param reference A taxonomic reference in taxonAlign's format (see
-#'  [taxonAlign::taxonomic_reference_schema()]), e.g. from [load_WCVP()] or [load_CoL()].
+#'  [taxonAlign::taxonomic_reference_schema()]), e.g. from [load_WCVP()] or [load_CatalogueOfLife()].
 #' @param country One or more two-letter ISO 3166-1 country codes, e.g. `"AU"` or `c("AU", "NZ")`.
 #' @param gbif_taxon Optional GBIF taxon name(s) to limit the occurrence search to, e.g.
 #'  `"Tracheophyta"` or `c("Animalia", "Fungi")`. Defaults to `"Tracheophyta"` for a WCVP reference;
 #'  otherwise every occurrence record in the country is used.
 #' @param gbif_taxon_rank,gbif_kingdom Optional rank and kingdom for `gbif_taxon`, to disambiguate a
-#'  homonym (see [generate_GBIF_taxonomic_reference_list()]).
+#'  homonym in GBIF's taxonomy (e.g. `gbif_kingdom = "Plantae"` for the plant genus *Eremophila*).
 #' @param whole_species Logical; keep every infraspecific taxon of a kept species, and the species of
 #'  a kept infraspecific taxon. Defaults to `TRUE`.
+#' @param exclude_fossils Logical; leave out names whose GBIF records in the country are all fossil
+#'  specimens. Defaults to `TRUE`. Not applied when `...` includes a `basisOfRecord` filter.
 #' @param refresh_cache Logical; if `TRUE`, fetches the GBIF names again. Defaults to `FALSE`.
 #' @param cache_dir Directory the GBIF names are cached in. Defaults to
 #'  `tools::R_user_dir("taxonAlign", "cache")`.
@@ -47,14 +52,15 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' @param ... Further GBIF occurrence search filters, passed to [rgbif::occ_search()].
 #'
 #' @return `reference`, with only the kept records (and its attributes, such as `"version"` and
-#'  `"citation"`). Attributes added: `"country"`, and `"unmatched"` -- a tibble of the GBIF names
-#'  recorded in the country, at species rank or below, that matched nothing in the reference (worth a
-#'  look: names the reference lacks, or spells differently).
+#'  `"citation"`). Attributes added: `"country"`; `"gbif_names"`, a tibble of every name GBIF has
+#'  records of in the country (`scientific_name` as GBIF writes it, `canonical_name` as parsed), the
+#'  list the filter was based on; and `"unmatched"`, those of them at species rank or below that
+#'  matched nothing in the reference (worth a look: names the reference lacks, or spells differently).
 #'
 #' @examples
 #' \dontrun{
 #' wcvp_au <- load_WCVP() |> filter_to_country("AU")
-#' col_au_nz <- load_CoL() |>
+#' col_au_nz <- load_CatalogueOfLife(extended = TRUE) |>
 #'   filter_to_country(c("AU", "NZ"), gbif_taxon = c("Animalia", "Plantae", "Fungi"))
 #' }
 #'
@@ -65,6 +71,7 @@ filter_to_country <- function(reference,
                               gbif_taxon_rank = NULL,
                               gbif_kingdom = NULL,
                               whole_species = TRUE,
+                              exclude_fossils = TRUE,
                               refresh_cache = FALSE,
                               cache_dir = tools::R_user_dir("taxonAlign", "cache"),
                               quiet = FALSE,
@@ -82,7 +89,7 @@ filter_to_country <- function(reference,
   }
 
   gbif_names <- fetch_gbif_country_names(country, gbif_taxon, gbif_taxon_rank, gbif_kingdom,
-                                         refresh_cache, cache_dir, quiet, ...)
+                                         refresh_cache, cache_dir, quiet, exclude_fossils, ...)
   keep <- country_filter_records(reference, gbif_names$canonical_name, whole_species)
 
   out <- reference[keep, ]
@@ -90,6 +97,7 @@ filter_to_country <- function(reference,
   ref_keys <- country_match_key(reference$canonical_name)
   species_level <- grepl("\\s", gbif_names$canonical_name)
   attr(out, "country") <- country
+  attr(out, "gbif_names") <- gbif_names
   attr(out, "unmatched") <- gbif_names[species_level & !country_match_key(gbif_names$canonical_name, autonyms = TRUE) %in% ref_keys, ]
   if (!quiet) {
     n_matched <- sum(species_level) - nrow(attr(out, "unmatched"))
@@ -125,8 +133,12 @@ country_match_key <- function(x, autonyms = FALSE) {
 country_filter_records <- function(reference, gbif_canonical, whole_species) {
   rank <- APCalign::standardise_taxon_rank(reference$taxon_rank)
   genus_level <- rank %in% c("genus", "subgenus")
-  species_level <- !genus_level & grepl("\\s", reference$canonical_name)
-  above <- !genus_level & !species_level
+  # a name of no stated rank -- e.g. the Catalogue of Life Extended Release's 2.17 million "unranked"
+  # barcode clusters (BOLD BINs, UNITE species hypotheses) -- is kept only if GBIF has records of it,
+  # with its accepted name; counting it as "above genus" (kept whole) kept every one worldwide
+  unranked <- is.na(rank) | rank %in% c("unranked", "other", "no rank")
+  species_level <- !genus_level & !unranked & grepl("\\s", reference$canonical_name)
+  above <- !genus_level & !species_level & !unranked
   key <- country_match_key(reference$canonical_name)
   recorded <- key %in% country_match_key(gbif_canonical, autonyms = TRUE)
   id <- reference$taxon_ID
@@ -150,18 +162,22 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
   keep <- keep | (rank == "genus" & accepted_of %in% kept_genus_accepted) |
     (rank == "subgenus" & reference$genus %in% kept_genera) | above
 
+  keep <- keep | (unranked & accepted_of %in% unique(accepted_of[recorded & unranked]))
+
   # whatever a kept record leads to stays too, so the result still passes check_taxonomic_reference()
   keep | id %in% accepted_of[keep]
 }
 
 # The names GBIF has occurrence records of in each country (within `gbif_taxon`, if given), as
 # a tibble of scientific_name (as GBIF writes it, with authorship) and canonical_name (parsed by GBIF's
-# name parser, rank markers kept). Cached per country and taxon as
-# <cache_dir>/gbif_names_<key>_<country>.rds; once cached, used without going online until
-# `refresh_cache = TRUE`.
+# name parser, rank markers kept). With `exclude_fossils`, a name all of whose records are fossil
+# specimens is left out (a second facet query, on basisOfRecord = "FOSSIL_SPECIMEN", compared by record
+# count): a name with both fossil and other records stays. Cached per country and taxon as
+# <cache_dir>/gbif_names_COLXR_<key>_<country>[_nofossil].rds; once cached, used without going online
+# until `refresh_cache = TRUE`.
 #' @noRd
 fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_kingdom,
-                                     refresh_cache, cache_dir, quiet, ...) {
+                                     refresh_cache, cache_dir, quiet, exclude_fossils = FALSE, ...) {
   roots <- if (is.null(gbif_taxon)) list(list(key = NULL, label = "all")) else {
     lapply(seq_along(gbif_taxon), function(i) {
       root <- resolve_gbif_taxon(gbif_taxon[i], gbif_taxon_rank[i], gbif_kingdom[i])
@@ -169,47 +185,72 @@ fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_
     })
   }
   extra <- list(...)
-  extra_label <- if (length(extra) == 0) "" else paste0("_", substr(rlang::hash(extra), 1, 8))
+  # a basisOfRecord filter of the caller's own decides which records count; fossils aren't second-guessed
+  exclude_fossils <- isTRUE(exclude_fossils) && !"basisOfRecord" %in% names(extra)
+  extra_label <- paste0(if (length(extra) == 0) "" else paste0("_", substr(rlang::hash(extra), 1, 8)),
+                        if (exclude_fossils) "_nofossil" else "")
   dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
   names <- lapply(country, function(cc) lapply(roots, function(root) {
-    cache_file <- file.path(cache_dir, paste0("gbif_names_", root$label, "_", cc, extra_label, ".rds"))
+    # "COLXR": names fetched under GBIF's taxonomy since rgbif 3.9.0, so a list cached under the old GBIF
+    # Backbone (named without it) is never reused
+    cache_file <- file.path(cache_dir, paste0("gbif_names_COLXR_", root$label, "_", cc, extra_label, ".rds"))
     if (!refresh_cache && file.exists(cache_file)) {
       if (!quiet) message("Using the GBIF names recorded in ", cc, " (", root$label, "), cached ",
                           format(as.Date(file.info(cache_file)$mtime)), ". To fetch them again, use `refresh_cache = TRUE`.")
       return(readRDS(cache_file))
     }
     if (!quiet) message("Fetching the names GBIF has occurrence records of in ", cc, " (", root$label, ")...")
-    scientific <- character(0)
-    page <- 100000
-    repeat {
-      occ <- with_gbif_retry(function() {
-        do.call(rgbif::occ_search, c(
-          list(taxonKey = root$key, checklistKey = gbif_backbone_dataset_key, country = cc, limit = 0,
-               facet = "scientificName",
-               scientificName.facetLimit = page, scientificName.facetOffset = length(scientific),
-               curlopts = gbif_curlopts),
-          extra
-        ))
-      })
-      got <- if ("name" %in% names(occ$facets$scientificName)) occ$facets$scientificName$name else character(0)
-      scientific <- c(scientific, got)
-      if (length(got) < page) break
-    }
-    if (length(scientific) == 0) {
+    facet <- fetch_gbif_name_facet(root$key, cc, extra)
+    if (nrow(facet) == 0) {
       # not cached: an empty result is more likely a failed query than a real absence, and a cached one
       # would be reused silently from then on (traitecoevo/taxonAlign.dataprep#1)
       warning("GBIF has no occurrence records in ", cc, " (", root$label, "). Nothing was cached, so the ",
               "next call asks GBIF again.", call. = FALSE)
       return(parse_gbif_names(character(0)))
     }
-    if (!quiet) message("Parsing ", format(length(scientific), big.mark = ","), " names...")
-    parsed <- parse_gbif_names(unique(scientific))
+    if (exclude_fossils) {
+      fossil <- fetch_gbif_name_facet(root$key, cc, c(extra, list(basisOfRecord = "FOSSIL_SPECIMEN")))
+      fossil_count <- dplyr::coalesce(fossil$count[match(facet$name, fossil$name)], 0L)
+      fossil_only <- facet$count <= fossil_count
+      if (!quiet && any(fossil_only)) {
+        message("Leaving out ", format(sum(fossil_only), big.mark = ","), " names known only from fossil specimens.")
+      }
+      facet <- facet[!fossil_only, ]
+    }
+    if (!quiet) message("Parsing ", format(nrow(facet), big.mark = ","), " names...")
+    parsed <- parse_gbif_names(unique(facet$name))
     saveRDS(parsed, cache_file)
     parsed
   }))
   out <- dplyr::bind_rows(unlist(names, recursive = FALSE))
   out[!duplicated(out$scientific_name), ]
+}
+
+# Every name (scientificName facet) of the occurrence records in country `cc` below `key`, with its
+# record count, paging through the facet 100,000 names at a time.
+#' @noRd
+fetch_gbif_name_facet <- function(key, cc, extra) {
+  pages <- list()
+  page <- 100000
+  offset <- 0
+  repeat {
+    occ <- with_gbif_retry(function() {
+      do.call(rgbif::occ_search, c(
+        list(taxonKey = key, checklistKey = gbif_COL_XR_checklist_key, country = cc, limit = 0,
+             facet = "scientificName",
+             scientificName.facetLimit = page, scientificName.facetOffset = offset,
+             curlopts = gbif_curlopts),
+        extra
+      ))
+    })
+    got <- occ$facets$scientificName
+    if (is.null(got) || !"name" %in% names(got)) break
+    pages[[length(pages) + 1]] <- dplyr::tibble(name = got$name, count = as.integer(got$count))
+    offset <- offset + nrow(got)
+    if (nrow(got) < page) break
+  }
+  dplyr::bind_rows(dplyr::tibble(name = character(0), count = integer(0)), pages)
 }
 
 # GBIF's name parser, in batches: scientific name with authorship -> canonical name with rank markers

@@ -25,20 +25,29 @@ country_test_reference <- function(dataset = "TEST") {
 local_mock_gbif_names <- function(.env = parent.frame()) {
   calls <- new.env()
   calls$occ <- 0
+  calls$fossil <- 0
   testthat::local_mocked_bindings(
     occ_search = function(...) {
+      args <- list(...)
+      # the fossil-specimen query: Diprotodon is known only from fossils, Eucalyptus from both
+      if (identical(args$basisOfRecord, "FOSSIL_SPECIMEN")) {
+        calls$fossil <- calls$fossil + 1
+        return(list(facets = list(scientificName = tibble::tibble(
+          name = c("Eucalyptus L'Hér.", "Diprotodon Owen"), count = c(1L, 5L)
+        ))))
+      }
       calls$occ <- calls$occ + 1
-      calls$args <- list(...)
+      calls$args <- args
       list(facets = list(scientificName = tibble::tibble(
-        name = c("Eucalyptus gigantea Dehnh.", "Racosperma dealbatum (Link) Pedley", "Eucalyptus L'Hér.", "Banksia serrata L.f."),
-        count = 4:1
+        name = c("Eucalyptus gigantea Dehnh.", "Racosperma dealbatum (Link) Pedley", "Eucalyptus L'Hér.", "Banksia serrata L.f.", "Diprotodon Owen"),
+        count = c(4:1, 5L)
       )))
     },
     name_parse = function(scientificname, ...) data.frame(
       scientificname = scientificname,
-      canonicalnamewithmarker = sub(" (L'Hér\\.|Dehnh\\.|\\(Link\\) Pedley|L\\.f\\.)$", "", scientificname)
+      canonicalnamewithmarker = sub(" (L'Hér\\.|Dehnh\\.|\\(Link\\) Pedley|L\\.f\\.|Owen)$", "", scientificname)
     ),
-    name_backbone = function(...) data.frame(usageKey = 7707728L, matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED"),
+    name_backbone = function(...) data.frame(usageKey = "TP", matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED"),
     .package = "rgbif", .env = .env
   )
   calls
@@ -58,6 +67,28 @@ test_that("a GBIF name matching a synonym keeps its accepted name, all its synon
   expect_equal(calls$args$country, "AU")
 })
 
+test_that("a name of no rank is kept only if GBIF has records of it", {
+  # the COL XR holds millions of "unranked" barcode clusters; they used to count as "above genus",
+  # kept whole, whatever the country
+  ref <- dplyr::bind_rows(
+    country_test_reference(),
+    tibble::tibble(taxon_ID = c("U1", "U2"), accepted_name_usage_ID = c("U1", "U2"),
+                   canonical_name = c("BOLD:AAA0001", "BOLD:ZZZ9999"), scientific_name = canonical_name,
+                   taxonomic_dataset = "TEST", taxon_rank = "unranked", taxonomic_status = "accepted", genus = NA)
+  )
+  calls <- local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    occ_search = function(...) list(facets = list(scientificName = tibble::tibble(name = c("Eucalyptus gigantea Dehnh.", "BOLD:AAA0001"), count = 2:1))),
+    name_parse = function(scientificname, ...) data.frame(scientificname = scientificname, canonicalnamewithmarker = sub(" Dehnh\\.$", "", scientificname)),
+    .package = "rgbif"
+  )
+  out <- filter_to_country(ref, "AU", exclude_fossils = FALSE, cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true("U1" %in% out$taxon_ID)
+  expect_false("U2" %in% out$taxon_ID)
+  # ranks above genus are still kept whole
+  expect_true("F1" %in% out$taxon_ID)
+})
+
 test_that("whole_species = FALSE keeps only the recorded taxa themselves", {
   local_mock_gbif_names()
   out <- filter_to_country(country_test_reference(), "AU", whole_species = FALSE, cache_dir = withr::local_tempdir(), quiet = TRUE)
@@ -70,8 +101,8 @@ test_that("the GBIF names are cached, and a WCVP reference defaults to vascular 
   calls <- local_mock_gbif_names()
   ref <- country_test_reference("WCVP")
   out1 <- filter_to_country(ref, "AU", cache_dir = cache, quiet = TRUE)
-  expect_equal(calls$args$taxonKey, 7707728L)
-  expect_true(file.exists(file.path(cache, "gbif_names_7707728_AU.rds")))
+  expect_equal(calls$args$taxonKey, "TP")
+  expect_true(file.exists(file.path(cache, "gbif_names_COLXR_TP_AU_nofossil.rds")))
   expect_message(out2 <- filter_to_country(ref, "AU", cache_dir = cache), "Using the GBIF names recorded in AU")
   expect_equal(out2, out1)
   expect_equal(calls$occ, 1)
@@ -85,25 +116,49 @@ test_that("several countries combine their names, and extra filters reach GBIF",
   expect_equal(calls$args$basisOfRecord, "PRESERVED_SPECIMEN")
 })
 
-test_that("GBIF is asked for the Backbone taxonomy, whatever rgbif's default", {
-  # rgbif 3.9.0 made COL XR the default: name_backbone("Tracheophyta") returned "TP", which became an
-  # NA key, and the empty result was cached (traitecoevo/taxonAlign.dataprep#1)
+test_that("GBIF is asked for its own taxonomy (COL XR), whatever rgbif's default", {
+  # rgbif 3.9.0 made COL XR the default and the Backbone code turned "TP" into an NA key, then cached
+  # the empty result (traitecoevo/taxonAlign.dataprep#1); the checklist is now always named
   calls <- local_mock_gbif_names()
-  filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
-  expect_equal(calls$args$checklistKey, gbif_backbone_dataset_key)
+  out <- filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_equal(calls$args$checklistKey, gbif_COL_XR_checklist_key)
+  # the GBIF names the filter used are returned with it
+  expect_equal(nrow(attr(out, "gbif_names")), 4)
 })
 
-test_that("a key that isn't a Backbone key stops, rather than querying GBIF with no taxon", {
+test_that("names known only from fossil specimens are left out, unless asked for", {
+  calls <- local_mock_gbif_names()
+  out <- filter_to_country(country_test_reference(), "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  # Diprotodon: all 5 records fossils, left out; Eucalyptus: 1 of 2, kept
+  expect_false("Diprotodon" %in% attr(out, "gbif_names")$canonical_name)
+  expect_true("Eucalyptus" %in% attr(out, "gbif_names")$canonical_name)
+  expect_equal(calls$fossil, 1)
+  kept <- filter_to_country(country_test_reference(), "AU", exclude_fossils = FALSE, cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true("Diprotodon" %in% attr(kept, "gbif_names")$canonical_name)
+  expect_equal(calls$fossil, 1)
+})
+
+test_that("a name GBIF can't place stops, rather than querying GBIF with no taxon", {
   calls <- local_mock_gbif_names()
   testthat::local_mocked_bindings(
-    name_backbone = function(...) data.frame(usageKey = "TP", matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED"),
+    name_backbone = function(...) data.frame(usageKey = "P", matchType = "HIGHERRANK", rank = "KINGDOM", status = "ACCEPTED", scientificName = "Plantae"),
     .package = "rgbif"
   )
   cache <- withr::local_tempdir()
   expect_error(filter_to_country(country_test_reference("WCVP"), "AU", cache_dir = cache, quiet = TRUE),
-               "isn't a GBIF Backbone key")
+               "only matched as far as Plantae")
   expect_equal(calls$occ, 0)
   expect_length(list.files(cache), 0)
+})
+
+test_that("a synonym in GBIF's taxonomy is followed to its accepted key", {
+  calls <- local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    name_backbone = function(...) data.frame(usageKey = "9CLWS", acceptedUsageKey = "LV7", matchType = "EXACT", rank = "GENUS", status = "SYNONYM"),
+    .package = "rgbif"
+  )
+  filter_to_country(country_test_reference(), "AU", gbif_taxon = "Racosperma", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_equal(calls$args$taxonKey, "LV7")
 })
 
 test_that("an empty GBIF result warns and isn't cached", {
