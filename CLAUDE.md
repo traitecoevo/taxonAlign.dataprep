@@ -93,7 +93,7 @@ interactive session), mostly going on through `taxonAlign::prepare_taxonomic_res
 `build_and_prepare()`), using a copy of taxonAlign's `sample_taxonomic_resources()` fixture
 (`helper-align-taxa-fixtures.R`). All offline.
 
-172 expectations, all passing as of the last `devtools::test()` run (2026-11-14), all offline (the removed GBIF/taxadb builders took ~90 with them).
+177 expectations, all passing as of the last `devtools::test()` run (2026-11-14), all offline (the removed GBIF/taxadb builders took ~90 with them).
 
 Gotcha if you add more end-to-end tests: don't wrap a block of `local_mocked_bindings()` calls in a
 plain helper function and call that helper from inside `test_that()` without forwarding `.env` — the

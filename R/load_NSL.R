@@ -159,7 +159,9 @@ load_NSL <- function(taxon_group,
     }, character(1)),
     collapse = "_"
   )
-  cache_file <- file.path(cache_dir, paste0("NSL_", taxon_group, "_", cache_key, ".rds"))
+  # "_2": the reshaped format -- bump whenever reshape_NSL_*() changes, so an older cached result
+  # isn't reused (2: kept family/order/class/subclass/kingdom, scientific_name_ID, taxon_distribution)
+  cache_file <- file.path(cache_dir, paste0("NSL_", taxon_group, "_", cache_key, "_2.rds"))
 
   if (!refresh_cache && file.exists(cache_file)) {
     if (!quiet) message("Using cached \"", taxon_group, "\" NSL reference (reshaped from \"", path, "\").")
@@ -284,7 +286,23 @@ reshape_NSL_taxon <- function(taxon_raw) {
     genus = derive_NSL_genus(taxon_raw$canonical_name, taxon_raw$taxon_rank),
     taxon_ID = taxon_id,
     accepted_name_usage_ID = ifelse(not_synonymy, taxon_id, accepted_name_usage_id)
-  )
+  ) |>
+    dplyr::bind_cols(NSL_extra_columns(taxon_raw))
+}
+
+# Columns of an NSL export kept alongside taxonAlign's required ones, as APCalign's own lookup reports
+# them: the name's ID (an APNI-style LSID), its classification and its distribution. They used to be
+# dropped, so every lookup against an NSL dataset had `family` NA (found by a tester aligning a
+# vertebrate list, traitecoevo/taxonAlign.dataprep#1). The classification columns are ranks, which
+# taxonAlign::prepare_taxonomic_resources() reads as such; the other two aren't.
+#' @noRd
+NSL_extra_columns <- function(raw) {
+  keep <- c(scientific_name_ID = "scientific_name_id", kingdom = "kingdom", class = "class",
+            subclass = "subclass", order = "order", family = "family",
+            taxon_distribution = "taxon_distribution")
+  keep <- keep[keep %in% names(raw)]
+  out <- lapply(keep, function(col) dplyr::na_if(as.character(raw[[col]]), ""))
+  dplyr::as_tibble(stats::setNames(out, names(keep)))
 }
 
 # Writes the subgenus back into a zoological species-level name, e.g. "Pardalotus striatus" ->
@@ -350,7 +368,8 @@ reshape_NSL_names <- function(names_raw) {
     genus = genus,
     taxon_ID = scientific_name_id,
     accepted_name_usage_ID = scientific_name_id
-  )
+  ) |>
+    dplyr::bind_cols(NSL_extra_columns(names_raw))
 }
 
 # Removes quote marks around a word or name from `canonical_name` ("'Ochlerotatus' notoscriptus" ->

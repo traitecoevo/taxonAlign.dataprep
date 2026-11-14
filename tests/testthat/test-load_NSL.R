@@ -253,3 +253,21 @@ test_that("the AFD's usage markers are read as statuses and removed from names",
     c("Ochlerotatus notoscriptus", "Ziba flammea", "Allotria d'arci")
   )
 })
+
+test_that("the export's family, other classification, name ID and distribution reach the lookup", {
+  # they used to be dropped, so every lookup against an NSL dataset had family NA
+  # (traitecoevo/taxonAlign.dataprep#1)
+  taxon <- sample_nsl_taxon_raw()
+  names(taxon) <- standardise_NSL_column_names(names(taxon))
+  taxon$family <- ifelse(tolower(taxon$taxon_rank) %in% c("family", "order", "class"), NA, "Testaceae")
+  taxon$taxon_distribution <- "WA, NT"
+  out <- reshape_NSL_taxon(taxon)
+  expect_true(all(c("family", "scientific_name_ID", "taxon_distribution") %in% names(out)))
+  expect_equal(out$scientific_name_ID, taxon$scientific_name_id)
+
+  ref <- dplyr::filter(out, !is.na(canonical_name))
+  lookup <- taxonAlign::create_taxonomic_update_lookup(ref$canonical_name[tolower(ref$taxon_rank) == "species"][1], ref, full = TRUE)
+  expect_equal(lookup$family, "Testaceae")
+  expect_false(is.na(lookup$scientific_name_ID))
+  expect_equal(lookup$taxon_distribution, "WA, NT")
+})

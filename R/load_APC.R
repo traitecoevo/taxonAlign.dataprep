@@ -22,6 +22,14 @@ load_APC <- function(quiet = FALSE, ...) {
     APC$family_accepted |> dplyr::mutate(taxonomic_dataset = "APC"),
     APC$family_synonym
   )
+  # The records synonyms lead to that APCalign's split tables leave out -- excluded taxa (not native or
+  # naturalised in Australia): "Achneria brevifolia" -> "Eriachne brevifolia" (excluded). APCalign
+  # follows synonyms to them in its full `APC` table; without them 24 synonyms led nowhere and the
+  # result failed taxonAlign::check_taxonomic_reference(). Only those: the rest of the full table
+  # (e.g. 24 excluded "Eucalyptus sp." placeholders) would become names to match against, which
+  # APCalign never matches.
+  missing_targets <- setdiff(flat$accepted_name_usage_ID, flat$taxon_ID)
+  flat <- dplyr::bind_rows(flat, APC$APC[APC$APC$taxon_ID %in% missing_targets, ] |> dplyr::mutate(taxonomic_dataset = "APC"))
   # `subclass` and `taxon_distribution` are only in APCalign's full `APC` table; APCalign's own lookup
   # reports them, so taxonAlign's should too (traitecoevo/taxonAlign.dataprep#1)
   extra <- APC$APC[, c("taxon_ID", "subclass", "taxon_distribution")]
