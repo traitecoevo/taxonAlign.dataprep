@@ -48,6 +48,12 @@ download (~170MB) and the reshaped result (~5.5 million names in COL26.10) are c
 it loads from your computer, offline.
 }
 \details{
+That download only exists once a ChecklistBank user has generated it, so a new release can be
+without one for a while. Then the Catalogue of Life's own copy of the release is downloaded instead
+(from \verb{https://download.checklistbank.org/col/}): the same release, but a larger download (~1GB),
+since it holds references, distributions and more besides the names. The Extended Releases have no
+such copy, so one ChecklistBank hasn't prepared can't be loaded until it has.
+
 Name a release to make an alignment reproducible, by its ChecklistBank key (e.g. \code{316595} for
 COL26.10, \code{310463} for the COL25 annual release, \code{316691} for the COL26.10 Extended Release) or
 alias (\code{"COL26.10"}). By default it's the latest release (as of your first download; see \code{version}).
