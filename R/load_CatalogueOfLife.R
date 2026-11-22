@@ -20,6 +20,12 @@ taxonAlign_CoL_api <- "https://api.checklistbank.org"
 #' download (~170MB) and the reshaped result (~5.5 million names in COL26.10) are cached, so after that
 #' it loads from your computer, offline.
 #'
+#' ChecklistBank only prepares that download once someone asks for it, so a new release can be
+#' without one for a while. Then the Catalogue of Life's own copy of the release is downloaded instead
+#' (from `https://download.checklistbank.org/col/`): the same release, but a larger download (~1GB),
+#' since it holds references, distributions and more besides the names. The Extended Releases have no
+#' such copy, so one ChecklistBank hasn't prepared can't be loaded until it has.
+#'
 #' Name a release to make an alignment reproducible, by its ChecklistBank key (e.g. `316595` for
 #' COL26.10, `310463` for the COL25 annual release, `316691` for the COL26.10 Extended Release) or
 #' alias (`"COL26.10"`). By default it's the latest release (as of your first download; see `version`).
@@ -91,10 +97,7 @@ load_CatalogueOfLife <- function(version = NULL,
               "shortly; after this, it loads from your computer in seconds.")
     }
     # a release never changes once published, so one already downloaded is never downloaded again
-    if (!file.exists(file)) {
-      download_to_cache(paste0(taxonAlign_CoL_api, "/dataset/", meta$key, "/export.zip?format=ColDP"), file,
-                        paste0("the Catalogue of Life release ", meta$alias, " (ChecklistBank key ", meta$key, ")"), quiet)
-    }
+    if (!file.exists(file)) download_CoL_release(meta, file, quiet)
   }
 
   # downloads stay in <cache_dir>/CoL/, where load_CoL() kept them; the reshaped result is named anew
@@ -107,9 +110,12 @@ load_CatalogueOfLife <- function(version = NULL,
 
   if (!quiet) message("Reading and reshaping the Catalogue of Life...")
   usage_file <- if (grepl("\\.zip$", file, ignore.case = TRUE)) unz(file, CoL_name_table(file)) else file
+  # only the columns reshape_CatalogueOfLife() uses: the COL's own copy of a release has many more
+  # (NameUsage.tsv is ~2.3GB there, against ~0.5GB in a ChecklistBank export)
   raw <- readr::read_tsv(
     usage_file, quote = "", na = "", progress = FALSE,
-    col_types = readr::cols(.default = readr::col_character())
+    col_types = readr::cols(.default = readr::col_character()),
+    col_select = dplyr::matches(paste0("^(col:)?(", paste(CoL_columns_used, collapse = "|"), ")$"), ignore.case = FALSE)
   )
   names(raw) <- sub("^col:", "", names(raw))
   reference <- reshape_CatalogueOfLife(raw)
@@ -118,6 +124,57 @@ load_CatalogueOfLife <- function(version = NULL,
   dir.create(dirname(cache_file), recursive = TRUE, showWarnings = FALSE)
   saveRDS(reference, cache_file)
   reference
+}
+
+# The NameUsage.tsv columns reshape_CatalogueOfLife() reads (`extinct` only if there).
+CoL_columns_used <- c("ID", "parentID", "status", "rank", "scientificName", "authorship", "extinct")
+
+# Downloads a release's ColDP export to `file`: ChecklistBank's prepared export (small, ~140-170MB),
+# or, if ChecklistBank hasn't prepared one, the COL's own copy of the release (~1GB, with references,
+# distributions, etc. besides the names). ChecklistBank prepares an export only when someone asks for
+# one, and asking needs a ChecklistBank login: COL26.11 (key 317005) had none 11 days after release
+# (taxonAlign.dataprep issue #2). The COL's own copies, at download.checklistbank.org/col/, are named
+# by release date (monthly/<issued>_coldp.zip) or year (annual/<year>_coldp.zip); the Extended
+# Releases have none.
+#' @noRd
+download_CoL_release <- function(meta, file, quiet = FALSE) {
+  what <- paste0("the Catalogue of Life release ", meta$alias, " (ChecklistBank key ", meta$key, ")")
+  tryCatch(
+    download_to_cache(paste0(taxonAlign_CoL_api, "/dataset/", meta$key, "/export.zip?format=ColDP"), file, what, quiet),
+    taxonAlign_download_error = function(e) {
+      if (!isTRUE(e$status == 404)) stop(e)
+      archive <- CoL_archive_url(meta)
+      if (is.null(archive)) {
+        stop("ChecklistBank hasn't prepared a download of the Catalogue of Life release ", meta$alias,
+             " (key ", meta$key, ") yet, and the Catalogue of Life doesn't publish its own copy of ",
+             if (grepl("XR$", meta$alias %||% "")) "an Extended Release" else "this release", ". ",
+             "Load an earlier release with `version =` (", taxonAlign_CoL_api,
+             "/dataset?releasedFrom=3&origin=xrelease lists the Extended Releases), or try again later.", call. = FALSE)
+      }
+      if (!quiet) message("ChecklistBank hasn't prepared a download of ", meta$alias, " yet, so downloading ",
+                          "the Catalogue of Life's own copy of it instead. It's larger (~1GB, with much more ",
+                          "than names in it), so this takes longer.")
+      download_to_cache(archive, file, paste0("the Catalogue of Life's copy of ", meta$alias), quiet)
+    }
+  )
+}
+
+# Where the COL publishes its own copy of a release (NULL for an Extended Release, or without a date).
+#' @noRd
+CoL_archive_url <- function(meta) {
+  alias <- meta$alias %||% ""
+  issued <- meta$issued %||% NA_character_
+  if (is.na(issued) || !grepl("^\\d{4}-\\d{2}-\\d{2}$", issued)) return(NULL)
+  base <- "https://download.checklistbank.org/col/"
+  if (grepl("^COL\\d+\\.\\d+$", alias)) return(paste0(base, "monthly/", issued, "_coldp.zip"))
+  if (grepl("^COL\\d+$", alias)) return(paste0(base, "annual/", substr(issued, 1, 4), "_coldp.zip"))
+  NULL
+}
+
+# Whether a release has been downloaded (its zip, or the reshaped result, is in the cache).
+#' @noRd
+CoL_downloaded <- function(dir, key) {
+  file.exists(file.path(dir, key, "coldp.zip")) || file.exists(file.path(dir, paste0("CatalogueOfLife_", key, ".rds")))
 }
 
 # The name table in a ChecklistBank export: NameUsage.tsv in a ColDP export (the base releases), or,
@@ -170,8 +227,9 @@ reshape_CatalogueOfLife <- function(raw) {
 
 # The release `version` names (key, alias, DOI, citation), from ChecklistBank, cached alongside the
 # download as <cache_dir>/CoL/<key>/metadata.rds; `latest.rds` records which key "3LR" meant when it
-# was last looked up online. Offline (with refresh_cache = TRUE, or a release not yet downloaded), an
-# alias is looked up among the releases already downloaded ("3LR": the newest).
+# was last looked up online (used only once that release is downloaded). Offline (with refresh_cache =
+# TRUE, or a release not yet downloaded), an alias is looked up among the releases already looked up
+# ("3LR": the newest one downloaded).
 #' @noRd
 CoL_release_metadata <- function(version, cache_dir, quiet, refresh_cache = FALSE) {
   version <- as.character(version)
@@ -192,8 +250,11 @@ CoL_release_metadata <- function(version, cache_dir, quiet, refresh_cache = FALS
   latest <- version %in% c("3LR", "3LXR")
   latest_file <- file.path(dir, if (version == "3LXR") "latest_XR.rds" else "latest.rds")
   if (!refresh_cache) {
+    # only a release actually downloaded: a lookup whose download then failed mustn't pin "3LR" to a
+    # release that can't be loaded (issue #2: COL26.11, never downloaded, was used from then on)
     if (latest && file.exists(latest_file) &&
-        file.exists(file.path(dir, readRDS(latest_file), "metadata.rds"))) {
+        file.exists(file.path(dir, readRDS(latest_file), "metadata.rds")) &&
+        CoL_downloaded(dir, readRDS(latest_file))) {
       meta <- readRDS(file.path(dir, readRDS(latest_file), "metadata.rds"))
       if (!quiet) message("Using Catalogue of Life release ", meta$alias, " (ChecklistBank key ", meta$key,
                           "). To check for a newer release, use `refresh_cache = TRUE`.")
@@ -207,7 +268,7 @@ CoL_release_metadata <- function(version, cache_dir, quiet, refresh_cache = FALS
   if (is.null(response)) {
     metas <- cached_meta()
     is_xr <- function(m) grepl("XR$", m$alias %||% "")
-    hit <- if (latest) Filter(function(m) is_xr(m) == (version == "3LXR"), metas)[1] else Filter(function(m) identical(m$alias, version) || identical(m$key, version), metas)
+    hit <- if (latest) Filter(function(m) is_xr(m) == (version == "3LXR") && CoL_downloaded(dir, m$key), metas)[1] else Filter(function(m) identical(m$alias, version) || identical(m$key, version), metas)
     if (length(hit) > 0 && !is.null(hit[[1]])) {
       if (!quiet && latest) message("Couldn't reach ChecklistBank; using the most recent Catalogue of Life release already downloaded, ", hit[[1]]$alias, ".")
       return(hit[[1]])

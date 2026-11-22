@@ -22,25 +22,40 @@ extract_genus <- function(taxon_name) {
 }
 
 # Downloads `url` to `dest`, via a temporary file renamed only on success, so a failed download never
-# leaves a partial file where a complete one is expected (or removes one already there). A generous
-# time limit: these are full-checklist downloads (~90-170MB), far past R's default 60 seconds.
+# leaves a partial file where a complete one is expected (or removes one already there). No overall
+# time limit -- these are full-checklist downloads (~90MB-1GB), far past R's default 60 seconds -- but
+# a connection that stalls (under 100 bytes/s for 2 minutes) is given up on.
+# A failure says why (taxonAlign.dataprep issue #2: a 404 used to be reported as "Check that you're
+# online"): an HTTP error gives the status and the server's own message, and the error carries the
+# status (`e$status`, NA if the server was never reached), so a caller can try somewhere else.
 #' @noRd
 download_to_cache <- function(url, dest, what = basename(dest), quiet = FALSE) {
   dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
   partial <- paste0(dest, ".part")
-  old <- options(timeout = max(3600, getOption("timeout")))
-  on.exit(options(old), add = TRUE)
+  on.exit(unlink(partial), add = TRUE)
   if (!quiet) message("Downloading ", what, "...")
-  ok <- tryCatch(
-    utils::download.file(url, partial, mode = "wb", quiet = TRUE) == 0,
-    error = function(e) FALSE, warning = function(w) FALSE
-  )
-  if (ok) ok <- file.rename(partial, dest)
-  if (!ok) {
-    unlink(partial)
-    stop("Couldn't download ", what, " (", url, "). Check that you're online.", call. = FALSE)
+  handle <- curl::new_handle(followlocation = TRUE, connecttimeout = 30, low_speed_limit = 100, low_speed_time = 120)
+  response <- tryCatch(curl::curl_fetch_disk(url, partial, handle = handle), error = function(e) e)
+  if (inherits(response, "error")) {
+    download_error(paste0("Couldn't download ", what, " (", url, "): ", conditionMessage(response),
+                          ". Check that you're online."), NA_integer_)
   }
+  if (response$status_code != 200) {
+    # the body of an error response is a short explanation (ChecklistBank: {"code":404,"message":...})
+    body <- if (file.exists(partial) && file.size(partial) < 10000) paste(readLines(partial, warn = FALSE), collapse = " ") else ""
+    detail <- tryCatch(jsonlite::fromJSON(body)$message, error = function(e) NULL) %||%
+      if (grepl("^\\s*<", body)) "" else substr(body, 1, 200)
+    download_error(paste0("Couldn't download ", what, " (", url, "): the server answered ", response$status_code,
+                          if (nzchar(detail)) paste0(", \"", detail, "\""), "."), response$status_code)
+  }
+  if (!file.rename(partial, dest)) stop("Couldn't save ", what, " to \"", dest, "\".", call. = FALSE)
   dest
+}
+
+#' @noRd
+download_error <- function(message, status) {
+  stop(structure(class = c("taxonAlign_download_error", "error", "condition"),
+                 list(message = message, call = NULL, status = status)))
 }
 
 # The result of a short web request (`curl`), or NULL if it fails or times out -- for the small

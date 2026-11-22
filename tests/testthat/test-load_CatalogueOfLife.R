@@ -34,6 +34,7 @@ test_that("a release named by its key, already downloaded, is used without going
   dir.create(file.path(cache, "CoL", "316595"), recursive = TRUE)
   meta <- list(key = "316595", alias = "COL26.10", issued = "2026-10-14", doi = "10.48580/dgzh4", citation = "cite me")
   saveRDS(meta, file.path(cache, "CoL", "316595", "metadata.rds"))
+  file.create(file.path(cache, "CoL", "316595", "coldp.zip"))
   local_mocked_bindings(try_fetch = function(...) stop("network used"))
   expect_equal(CoL_release_metadata(316595, cache, TRUE), meta)
   # offline, "3LR" is the newest release already downloaded, and an alias is looked up locally
@@ -53,6 +54,7 @@ test_that("after the first lookup, the latest release (\"3LR\") is used from the
   json <- '{"key": 316595, "sourceKey": 3, "alias": "COL26.10", "title": "Catalogue of Life", "version": "2026-10-14", "issued": "2026-10-14", "doi": "10.48580/dgzh4"}'
   local_mocked_bindings(try_fetch = function(...) { calls <<- calls + 1; list(content = charToRaw(json)) })
   expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
+  file.create(file.path(cache, "CoL", "316595", "coldp.zip"))
   expect_message(again <- CoL_release_metadata("3LR", cache, FALSE), "Using Catalogue of Life release COL26.10.*refresh_cache = TRUE")
   expect_equal(again$key, "316595")
   # an alias already downloaded doesn't go online either
@@ -71,6 +73,7 @@ test_that("the latest Extended Release (\"3LXR\") is tracked apart from the late
   })
   expect_equal(CoL_release_metadata("3LXR", cache, TRUE)$key, "316691")
   expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
+  for (key in c("316691", "316595")) file.create(file.path(cache, "CoL", key, "coldp.zip"))
   local_mocked_bindings(try_fetch = function(...) stop("network used"))
   expect_equal(CoL_release_metadata("3LXR", cache, TRUE)$key, "316691")
   expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
@@ -118,4 +121,64 @@ test_that("the first load of a release warns that it's slow; a cached one doesn'
   expect_no_message(load_CatalogueOfLife(316595, cache_dir = cache, quiet = TRUE))
   msgs <- testthat::capture_messages(load_CatalogueOfLife(316595, cache_dir = cache))
   expect_false(any(grepl("slow the first time", msgs)))
+})
+
+test_that("\"3LR\" isn't pinned to a release whose download failed (issue #2)", {
+  cache <- withr::local_tempdir()
+  save_meta <- function(key, alias, issued) {
+    dir.create(file.path(cache, "CoL", key), recursive = TRUE)
+    saveRDS(list(key = key, alias = alias, issued = issued, doi = NA, citation = NA), file.path(cache, "CoL", key, "metadata.rds"))
+  }
+  # COL26.11 was looked up as the latest, but never downloaded; COL26.10 was
+  save_meta("316595", "COL26.10", "2026-10-14")
+  file.create(file.path(cache, "CoL", "316595", "coldp.zip"))
+  save_meta("317005", "COL26.11", "2026-11-11")
+  saveRDS("317005", file.path(cache, "CoL", "latest.rds"))
+  # so "3LR" is looked up online again, rather than used from the cache
+  local_mocked_bindings(try_fetch = function(...) stop("network used"))
+  expect_error(CoL_release_metadata("3LR", cache, TRUE), "network used")
+  # and offline, it's the newest release actually downloaded
+  local_mocked_bindings(try_fetch = function(...) NULL)
+  expect_equal(CoL_release_metadata("3LR", cache, TRUE)$key, "316595")
+})
+
+test_that("a release ChecklistBank has no download of comes from the COL's own copy (issue #2)", {
+  file <- file.path(withr::local_tempdir(), "CoL", "317005", "coldp.zip")
+  urls <- character(0)
+  local_mocked_bindings(download_to_cache = function(url, dest, ...) {
+    urls <<- c(urls, url)
+    if (grepl("api.checklistbank.org", url)) download_error("not found", 404L)
+    dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+    file.create(dest)
+    dest
+  })
+  meta <- list(key = "317005", alias = "COL26.11", issued = "2026-11-11")
+  expect_message(download_CoL_release(meta, file), "hasn't prepared a download of COL26.11")
+  expect_equal(urls, c("https://api.checklistbank.org/dataset/317005/export.zip?format=ColDP",
+                       "https://download.checklistbank.org/col/monthly/2026-11-11_coldp.zip"))
+  expect_true(file.exists(file))
+  # an annual release's copy is named by its year
+  expect_equal(CoL_archive_url(list(alias = "COL25", issued = "2025-06-13")),
+               "https://download.checklistbank.org/col/annual/2025_coldp.zip")
+  # an Extended Release has no copy: a clear error, naming the release
+  expect_null(CoL_archive_url(list(alias = "COL26.11 XR", issued = "2026-11-13")))
+  expect_error(download_CoL_release(list(key = "317100", alias = "COL26.11 XR", issued = "2026-11-13"), file, quiet = TRUE),
+               "COL26.11 XR.*doesn't publish its own copy of an Extended Release")
+  # any other failure (offline, a server error) isn't hidden by trying elsewhere
+  urls <- character(0)
+  local_mocked_bindings(download_to_cache = function(url, ...) { urls <<- c(urls, url); download_error("server error", 500L) })
+  expect_error(download_CoL_release(meta, file, quiet = TRUE), "server error")
+  expect_length(urls, 1)
+})
+
+test_that("only the columns used are read, so the COL's wider NameUsage.tsv loads the same", {
+  dir <- withr::local_tempdir()
+  wide <- sample_col_usage_raw() |> dplyr::mutate(`col:remarks` = "a note", `col:nameID` = "x", .before = 1)
+  readr::write_tsv(wide, file.path(dir, "NameUsage.tsv"), na = "", quote = "none")
+  cache <- withr::local_tempdir()
+  expect_equal(
+    load_CatalogueOfLife(path = file.path(dir, "NameUsage.tsv"), cache_dir = cache, quiet = TRUE),
+    load_CatalogueOfLife(path = write_sample_col_tsv(), cache_dir = cache, quiet = TRUE),
+    ignore_attr = TRUE
+  )
 })
