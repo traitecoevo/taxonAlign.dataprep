@@ -48,7 +48,7 @@ download (~170MB) and the reshaped result (~5.5 million names in COL26.10) are c
 it loads from your computer, offline.
 }
 \details{
-ChecklistBank only prepares that download once someone asks for it, so a new release can be
+That download only exists once a ChecklistBank user has generated it, so a new release can be
 without one for a while. Then the Catalogue of Life's own copy of the release is downloaded instead
 (from \verb{https://download.checklistbank.org/col/}): the same release, but a larger download (~1GB),
 since it holds references, distributions and more besides the names. The Extended Releases have no
