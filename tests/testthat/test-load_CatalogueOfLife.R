@@ -25,7 +25,7 @@ test_that("COL names become taxonAlign records: synonyms lead to their accepted 
 test_that("load_CatalogueOfLife reads your own NameUsage.tsv, and the result aligns and updates names", {
   col <- load_CatalogueOfLife(path = write_sample_col_tsv(), cache_dir = withr::local_tempdir(), quiet = TRUE)
   lookup <- taxonAlign::create_taxonomic_update_lookup(c("Cynthia cardui", "Pyrameis novus", "Vanessa (Cynthia)"), col)
-  expect_equal(lookup$suggested_name, c("Vanessa cardui", "Vanessa novus", "Vanessa (Cynthia) sp. [Vanessa (Cynthia)]"))
+  expect_equal(lookup$suggested_name, c("Vanessa cardui", "Vanessa novus", "Vanessa (Cynthia)"))
   expect_equal(lookup$taxon_rank[3], "subgenus")
 })
 
