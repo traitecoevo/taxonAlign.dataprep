@@ -22,8 +22,10 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' matched record's *accepted* name is kept, together with every synonym of it, so old names in a list
 #' still update. With `whole_species = TRUE` (the default), every subspecies, variety, etc. of a kept
 #' species is kept too (and the species itself, for a recorded subspecies), whether or not GBIF has
-#' records under that name. Genera (and subgenera) of the kept taxa are kept, with their synonyms; ranks
-#' above genus are kept whole, as they don't limit which species can match.
+#' records under that name. Genera (and subgenera) of the kept taxa are kept, with their synonyms --
+#' only the genus records leading to one of those genera, since a genus name can belong to unrelated
+#' genera in different kingdoms; ranks above genus are kept whole, as they don't limit which species
+#' can match.
 #'
 #' GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
 #' for animals, fossils. A name known only from fossil specimens (*Diprotodon*, say) is left out by
@@ -157,10 +159,24 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
 
   # genera: those of the kept taxa, and any recorded at genus rank, with their synonyms
   kept_genera <- unique(c(reference$genus[keep], reference$canonical_name[recorded & rank == "genus"]))
-  genus_rows <- rank == "genus" & reference$canonical_name %in% kept_genera
+  # Of the genus and subgenus records with one of those (genus) names, only those leading to one of
+  # those genera: genus names are only unique within a kingdom, and the kept taxa give a genus by name
+  # alone. Matching by name alone kept the plant Medicago and its 14 synonyms in the Catalogue of Life's
+  # Australian vertebrates, because the fish genus Diploprion shares its name with one of them (and with
+  # them came the false fuzzy match "Kempiella" -> "Kamiella" -> Medicago); the old genus names of
+  # synonym species brought in whatever genus a homonym leads to (the bird synonym Gallina, the snail
+  # Obba), and so did subgenera filed under a homonym. 828 of the 4,539 accepted genera kept there had
+  # no kept species; now 108, 102 of them genera GBIF has records of at genus rank (whose kingdom
+  # the reference doesn't say). An old genus name dropped this way is still matchable:
+  # taxonAlign::prepare_taxonomic_resources() makes it a synonym of the genera of the accepted names its
+  # species lead to.
+  target <- match(accepted_of, id)
+  target_genus <- ifelse(rank[target] %in% "genus", reference$canonical_name[target], reference$genus[target])
+  leads_to_kept <- target_genus %in% kept_genera
+  genus_rows <- rank == "genus" & reference$canonical_name %in% kept_genera & leads_to_kept
   kept_genus_accepted <- unique(accepted_of[genus_rows])
   keep <- keep | (rank == "genus" & accepted_of %in% kept_genus_accepted) |
-    (rank == "subgenus" & reference$genus %in% kept_genera) | above
+    (rank == "subgenus" & reference$genus %in% kept_genera & leads_to_kept) | above
 
   keep <- keep | (unranked & accepted_of %in% unique(accepted_of[recorded & unranked]))
 
