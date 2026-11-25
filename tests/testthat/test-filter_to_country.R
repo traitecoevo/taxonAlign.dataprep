@@ -100,6 +100,25 @@ test_that("a genus homonym from another kingdom isn't kept with its namesake", {
   expect_silent(taxonAlign::check_taxonomic_reference(out2))
 })
 
+test_that("every synonym of a kept genus is kept, whatever its name, rank or `genus` column", {
+  # synonyms of the kept genus Acacia: a genus with an unrelated name, a subgenus with no `genus` (as
+  # the Catalogue of Life's subgenus synonym Notamacropus has), and a genus synonym of a kept subgenus
+  ref <- dplyr::bind_rows(
+    country_test_reference(),
+    tibble::tribble(
+      ~taxon_ID, ~accepted_name_usage_ID, ~canonical_name, ~taxon_rank, ~taxonomic_status, ~genus,
+      "K1", "G3", "Senegalia", "genus", "synonym", "Senegalia",
+      "K2", "G3", "Phyllodoce", "subgenus", "synonym", NA,
+      "K3", "K3", "Juliflorae", "subgenus", "accepted", "Acacia",
+      "K4", "K3", "Julifloria", "genus", "synonym", "Julifloria"
+    ) |> dplyr::mutate(scientific_name = canonical_name, taxonomic_dataset = "TEST", .after = canonical_name)
+  )
+  local_mock_gbif_names()
+  out <- filter_to_country(ref, "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true(all(c("G2", "G3", "K1", "K2", "K3", "K4") %in% out$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out))
+})
+
 test_that("a name of no rank is kept only if GBIF has records of it", {
   # the COL XR holds millions of "unranked" barcode clusters; they used to count as "above genus",
   # kept whole, whatever the country

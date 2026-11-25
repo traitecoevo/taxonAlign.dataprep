@@ -318,15 +318,25 @@ distribution data (the user stopped that line of investigation): GBIF works the 
 - **Genus homonyms** (2026-11-24, found aligning a vertebrate list against AFD + CoL AU vertebrates):
   kept taxa give their genus by name only, and genus names repeat across kingdoms, so matching genus
   records by name kept unrelated genera: the fish *Diploprion* shares its name with a genus synonym of
-  the plant *Medicago*, which kept *Medicago* with its 14 synonyms (and gave the CoL-alone fuzzy match
-  *Kempiella* -> *Kamiella* -> "*Medicago* sp."); old genus names of synonym species (*Gallina* ->
-  the snail *Obba*) and subgenera filed under a homonym did the same. Now a genus or subgenus record is
-  kept only if it leads to a kept genus (`target_genus %in% kept_genera`). CoL26.11 AU vertebrates:
-  111,267 -> 106,813 records, accepted genera with no kept species 828 of 4,539 -> 108 of 3,819 (102
-  of them genera GBIF records at genus rank, e.g. *Banksia*, which only a kingdom column could sort
-  out -- the ready format has none); no species-level record lost but two South American *Chironius*
-  snakes kept via an odd CoL subgenus synonym. An old genus name dropped this way still matches:
-  taxonAlign's higher-rank synthesis links it to its species' accepted genera.
+  the plant *Medicago*, which kept *Medicago* with its synonyms (and gave the CoL-alone fuzzy match
+  *Kempiella* -> *Kamiella* -> "*Medicago* sp."); a synonym sharing an Australian genus's name kept
+  its non-Australian genus (*Trichechus* -> the walrus *Odobenus*). The rule now, in three steps
+  (`country_filter_records()`): (1) kept genus names = the genus of every kept species-level record +
+  names GBIF records at genus rank; (2) of the genus records with such a name (and subgenus records
+  filed under one), only those *leading to* a genus with such a name; (3) every genus or subgenus
+  record leading to the same taxon as one of those -- all its synonyms, whatever their name, rank or
+  `genus` column. **User requirement: every valid synonym genus of a kept genus must be kept.** Checked
+  on CoL26.11 AU vertebrates against the CoL's own classification (kingdom/phylum/class derived from
+  `parentID` in the raw `NameUsage.tsv`): all 4,132 genus/subgenus synonyms leading to a kept accepted
+  vertebrate genus are kept (the name-only rule kept 4,089 -- step 3 used to cover genus rank only, and
+  43 subgenus synonyms such as *Notamacropus* have no `genus`); the vertebrate genus records dropped
+  (82 accepted, 331 synonyms) are all non-Australian genera and their synonyms. Records 111,267 ->
+  107,164. Still kept, as the ready format has no kingdom column: an *accepted* genus sharing its name
+  with a kept genus is indistinguishable from it (295 non-vertebrate accepted genera, e.g. the insect
+  *Himantopus*, the plant *Banksia*), with its synonyms. No species-level record lost but two South
+  American *Chironius* snakes kept via an odd CoL subgenus synonym. An old genus name dropped this way
+  still matches: taxonAlign's higher-rank synthesis makes a genus seen only on synonym species a
+  synonym of its species' accepted genera.
 - `gbif_taxon` defaults by `taxonomic_dataset` (`taxonAlign_country_filter_default_taxon`: WCVP ->
   `"Tracheophyta"`, key 7707728); otherwise no taxon limit (every occurrence in the country). Extra
   `...` go to `occ_search()` (e.g. `basisOfRecord`), and into the cache key.

@@ -22,10 +22,10 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' matched record's *accepted* name is kept, together with every synonym of it, so old names in a list
 #' still update. With `whole_species = TRUE` (the default), every subspecies, variety, etc. of a kept
 #' species is kept too (and the species itself, for a recorded subspecies), whether or not GBIF has
-#' records under that name. Genera (and subgenera) of the kept taxa are kept, with their synonyms --
-#' only the genus records leading to one of those genera, since a genus name can belong to unrelated
-#' genera in different kingdoms; ranks above genus are kept whole, as they don't limit which species
-#' can match.
+#' records under that name. The genera (and subgenera) of the kept taxa are kept, with every synonym
+#' of them. A genus name can belong to unrelated genera in different kingdoms, so a genus record
+#' with a kept genus's name is kept only if it leads to a kept genus (it's that genus, or one of its
+#' synonyms). Ranks above genus are kept whole, as they don't limit which species can match.
 #'
 #' GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
 #' for animals, fossils. A name known only from fossil specimens (*Diprotodon*, say) is left out by
@@ -157,26 +157,28 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
   }
   keep <- species_level & accepted_of %in% kept_accepted
 
-  # genera: those of the kept taxa, and any recorded at genus rank, with their synonyms
+  # Genera. Genus names are only unique within a kingdom, and the reference names a kept taxon's genus
+  # by name alone, so a genus is kept in three steps:
+  # 1. the kept genus names: the genus of every kept species-level record, and every name GBIF has
+  #    records of at genus rank;
+  # 2. of the genus records with one of those names (and the subgenus records filed under one), only
+  #    those leading to a genus with one of those names -- which drops a homonym in another kingdom: the
+  #    plant genus Diploprion is a synonym of Medicago, the fish genus Diploprion isn't;
+  # 3. every other genus or subgenus record leading to the same taxon as one of those: its synonyms,
+  #    whatever their names (and whatever their `genus` column says -- many CoL subgenus synonyms, such
+  #    as Notamacropus, have none).
+  # Matched by name alone (until 2026-11-24), the plant Medicago and its synonyms were kept in the
+  # Catalogue of Life's Australian vertebrates (with them came the false fuzzy match "Kempiella" ->
+  # "Kamiella" -> Medicago), and so were non-Australian genera that share a name with one of an
+  # Australian genus's synonyms (the walrus, Odobenus, through the synonym Trichechus). An accepted genus
+  # sharing its name with a kept genus is still kept, as the reference doesn't say its kingdom.
   kept_genera <- unique(c(reference$genus[keep], reference$canonical_name[recorded & rank == "genus"]))
-  # Of the genus and subgenus records with one of those (genus) names, only those leading to one of
-  # those genera: genus names are only unique within a kingdom, and the kept taxa give a genus by name
-  # alone. Matching by name alone kept the plant Medicago and its 14 synonyms in the Catalogue of Life's
-  # Australian vertebrates, because the fish genus Diploprion shares its name with one of them (and with
-  # them came the false fuzzy match "Kempiella" -> "Kamiella" -> Medicago); the old genus names of
-  # synonym species brought in whatever genus a homonym leads to (the bird synonym Gallina, the snail
-  # Obba), and so did subgenera filed under a homonym. 828 of the 4,539 accepted genera kept there had
-  # no kept species; now 108, 102 of them genera GBIF has records of at genus rank (whose kingdom
-  # the reference doesn't say). An old genus name dropped this way is still matchable:
-  # taxonAlign::prepare_taxonomic_resources() makes it a synonym of the genera of the accepted names its
-  # species lead to.
   target <- match(accepted_of, id)
   target_genus <- ifelse(rank[target] %in% "genus", reference$canonical_name[target], reference$genus[target])
-  leads_to_kept <- target_genus %in% kept_genera
-  genus_rows <- rank == "genus" & reference$canonical_name %in% kept_genera & leads_to_kept
-  kept_genus_accepted <- unique(accepted_of[genus_rows])
-  keep <- keep | (rank == "genus" & accepted_of %in% kept_genus_accepted) |
-    (rank == "subgenus" & reference$genus %in% kept_genera & leads_to_kept) | above
+  named <- (rank == "genus" & reference$canonical_name %in% kept_genera |
+              rank == "subgenus" & reference$genus %in% kept_genera) &
+    target_genus %in% kept_genera
+  keep <- keep | (genus_level & (named | accepted_of %in% unique(accepted_of[named]))) | above
 
   keep <- keep | (unranked & accepted_of %in% unique(accepted_of[recorded & unranked]))
 
