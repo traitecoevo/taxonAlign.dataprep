@@ -38,6 +38,8 @@ Defaults to \code{FALSE}.}
 A tibble in taxonAlign's reference format (see \code{\link[taxonAlign:taxonomic_reference_schema]{taxonAlign::taxonomic_reference_schema()}}).
 Combine groups the same way as any other references, e.g.
 \code{taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi"), load_NSL("lichens")))}.
+Without \code{path}, \code{NULL} (invisibly, with a message) if the data release can't be had, as
+\code{\link[taxonAlign:load_taxonomic_resources]{taxonAlign::load_taxonomic_resources()}} gives.
 }
 \description{
 Reads the Australian National Species List (NSL) export for one taxonomic group --

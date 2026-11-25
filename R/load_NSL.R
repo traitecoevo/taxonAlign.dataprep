@@ -114,6 +114,8 @@ taxonAlign_NSL_non_synonymy_statuses <- c(
 #' @return A tibble in taxonAlign's reference format (see [taxonAlign::taxonomic_reference_schema()]).
 #'  Combine groups the same way as any other references, e.g.
 #'  `taxonAlign::prepare_taxonomic_resources(list(load_NSL("fungi"), load_NSL("lichens")))`.
+#'  Without `path`, `NULL` (invisibly, with a message) if the data release can't be had, as
+#'  [taxonAlign::load_taxonomic_resources()] gives.
 #'
 #' @export
 load_NSL <- function(taxon_group,
@@ -135,6 +137,9 @@ load_NSL <- function(taxon_group,
       paste0("nsl_", taxon_group, c("_taxon", "_names"), ".parquet"), version,
       refresh_cache = refresh_cache, cache_dir = cache_dir, quiet = quiet
     )
+    # the release couldn't be had (taxonAlign has already said why): NULL, as taxonAlign's and
+    # APCalign's loaders give
+    if (is.null(files)) return(invisible(NULL))
     taxon_file <- files[[1]]
     names_file <- files[[2]]
     path <- paste0("taxonAlign data release ", basename(dirname(taxon_file)))

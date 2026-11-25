@@ -9,6 +9,16 @@ test_that("load_NSL errors clearly on an unknown taxon_group", {
   )
 })
 
+test_that("load_NSL gives NULL, not an error, when the data release can't be had", {
+  # as taxonAlign's own loaders do (download_data_release_files() returns NULL with a message)
+  local_mocked_bindings(download_data_release_files = function(...) {
+    message("Couldn't reach GitHub")
+    invisible(NULL)
+  }, .package = "taxonAlign")
+  expect_message(out <- load_NSL("fungi", version = "2026-11-14"), "Couldn't reach GitHub")
+  expect_null(out)
+})
+
 test_that("load_NSL errors clearly when the folder is missing", {
   expect_error(
     load_NSL("fungi", path = "/no/such/directory"),
