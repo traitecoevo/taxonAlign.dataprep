@@ -66,8 +66,13 @@ accepted name or a synonym in the reference, since the two taxonomies needn't ag
 matched record's \emph{accepted} name is kept, together with every synonym of it, so old names in a list
 still update. With \code{whole_species = TRUE} (the default), every subspecies, variety, etc. of a kept
 species is kept too (and the species itself, for a recorded subspecies), whether or not GBIF has
-records under that name. Genera (and subgenera) of the kept taxa are kept, with their synonyms; ranks
-above genus are kept whole, as they don't limit which species can match.
+records under that name. The genera (and subgenera) of the kept taxa are kept, with every synonym
+of them. A genus name can belong to unrelated genera in different kingdoms, so a genus record
+with a kept genus's name is kept only if it leads to a kept genus (it's that genus, or one of its
+synonyms), and, if \code{reference} has a \code{kingdom} column (as \code{\link[=load_CatalogueOfLife]{load_CatalogueOfLife()}}'s output does),
+only if it's in that genus's kingdom. With a \code{kingdom} column, a name GBIF has records of also
+counts only in the kingdom of \code{gbif_taxon}. Ranks above genus are kept whole, as they don't limit
+which species can match.
 
 GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
 for animals, fossils. A name known only from fossil specimens (\emph{Diprotodon}, say) is left out by

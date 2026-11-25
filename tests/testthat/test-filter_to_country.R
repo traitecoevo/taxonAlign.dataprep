@@ -67,6 +67,89 @@ test_that("a GBIF name matching a synonym keeps its accepted name, all its synon
   expect_equal(calls$args$country, "AU")
 })
 
+test_that("a genus homonym from another kingdom isn't kept with its namesake", {
+  # "Acacia" is also the name of a synonym of an unrelated genus (as the fish Diploprion is of the plant
+  # Medicago in the Catalogue of Life), which mustn't bring that genus and its synonyms along
+  ref <- dplyr::bind_rows(
+    country_test_reference(),
+    tibble::tribble(
+      ~taxon_ID, ~accepted_name_usage_ID, ~canonical_name, ~taxon_rank, ~taxonomic_status, ~genus,
+      "H1", "H2", "Acacia", "genus", "synonym", "Acacia",
+      "H2", "H2", "Medicagoa", "genus", "accepted", "Medicagoa",
+      "H3", "H2", "Kamiellus", "genus", "synonym", "Kamiellus",
+      "H4", "H4", "Medicagoa sativa", "species", "accepted", "Medicagoa"
+    ) |> dplyr::mutate(scientific_name = canonical_name, taxonomic_dataset = "TEST", .after = canonical_name)
+  )
+  local_mock_gbif_names()
+  out <- filter_to_country(ref, "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_false(any(c("H1", "H2", "H3", "H4") %in% out$taxon_ID))
+  expect_true(all(c("G2", "G3") %in% out$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out))
+
+  # the old genus name of a kept synonym species ("Racosperma dealbatum"), when the genus record of that
+  # name leads to a genus none of the kept taxa belong to: neither is kept (the bird synonym Gallina
+  # brought in the snail Obba this way)
+  ref2 <- country_test_reference() |>
+    dplyr::bind_rows(tibble::tibble(taxon_ID = "G9", accepted_name_usage_ID = "G9", canonical_name = "Othergenus",
+                                    scientific_name = "Othergenus", taxonomic_dataset = "TEST", taxon_rank = "genus",
+                                    taxonomic_status = "accepted", genus = "Othergenus")) |>
+    dplyr::mutate(accepted_name_usage_ID = ifelse(.data$taxon_ID == "G2", "G9", .data$accepted_name_usage_ID))
+  out2 <- filter_to_country(ref2, "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_false(any(c("G2", "G9") %in% out2$taxon_ID))
+  expect_true(all(c("S5", "S6", "G3") %in% out2$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out2))
+})
+
+test_that("every synonym of a kept genus is kept, whatever its name, rank or `genus` column", {
+  # synonyms of the kept genus Acacia: a genus with an unrelated name, a subgenus with no `genus` (as
+  # the Catalogue of Life's subgenus synonym Notamacropus has), and a genus synonym of a kept subgenus
+  ref <- dplyr::bind_rows(
+    country_test_reference(),
+    tibble::tribble(
+      ~taxon_ID, ~accepted_name_usage_ID, ~canonical_name, ~taxon_rank, ~taxonomic_status, ~genus,
+      "K1", "G3", "Senegalia", "genus", "synonym", "Senegalia",
+      "K2", "G3", "Phyllodoce", "subgenus", "synonym", NA,
+      "K3", "K3", "Juliflorae", "subgenus", "accepted", "Acacia",
+      "K4", "K3", "Julifloria", "genus", "synonym", "Julifloria"
+    ) |> dplyr::mutate(scientific_name = canonical_name, taxonomic_dataset = "TEST", .after = canonical_name)
+  )
+  local_mock_gbif_names()
+  out <- filter_to_country(ref, "AU", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true(all(c("G2", "G3", "K1", "K2", "K3", "K4") %in% out$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out))
+})
+
+test_that("with a `kingdom` column, genera are told apart by kingdom", {
+  # an animal genus Acacia (accepted, as a homonym can be in the COL), with a synonym and a species of
+  # its own named like a plant one; and the animal genus Banksia, a name GBIF has records of at genus
+  # rank -- searching plants (Tracheophyta), none of the animals is kept
+  ref <- dplyr::bind_rows(
+    country_test_reference() |> dplyr::mutate(kingdom = "Plantae"),
+    tibble::tribble(
+      ~taxon_ID, ~accepted_name_usage_ID, ~canonical_name, ~taxon_rank, ~taxonomic_status, ~genus, ~kingdom,
+      "Z1", "Z1", "Acacia", "genus", "accepted", "Acacia", "Animalia",
+      "Z2", "Z1", "Akakia", "genus", "synonym", "Akakia", "Animalia",
+      "Z3", "Z3", "Acacia dealbata", "species", "accepted", "Acacia", "Animalia",
+      "Z4", "Z4", "Banksia", "genus", "accepted", "Banksia", "Animalia",
+      "B1", "B1", "Banksia", "genus", "accepted", "Banksia", "Plantae"
+    ) |> dplyr::mutate(scientific_name = canonical_name, taxonomic_dataset = "TEST", .after = canonical_name)
+  )
+  local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    name_backbone = function(...) data.frame(usageKey = "TP", matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED", kingdom = "Plantae"),
+    .package = "rgbif"
+  )
+  out <- filter_to_country(ref, "AU", gbif_taxon = "Tracheophyta", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_false(any(c("Z1", "Z2", "Z3", "Z4") %in% out$taxon_ID))
+  expect_true(all(c("G2", "G3", "S5", "S6") %in% out$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out))
+
+  # without the column, the animal Acacia is indistinguishable from the plant one, and kept
+  out2 <- filter_to_country(dplyr::select(ref, -"kingdom"), "AU", gbif_taxon = "Tracheophyta",
+                            cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true(all(c("Z1", "Z2", "Z3") %in% out2$taxon_ID))
+})
+
 test_that("a name of no rank is kept only if GBIF has records of it", {
   # the COL XR holds millions of "unranked" barcode clusters; they used to count as "above genus",
   # kept whole, whatever the country
