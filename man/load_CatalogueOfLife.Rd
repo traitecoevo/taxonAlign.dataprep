@@ -68,7 +68,9 @@ lists every release.
 Each name becomes one record, read from the release's ColDP \code{NameUsage.tsv}: \code{canonical_name} is
 the scientific name without authorship, and \code{accepted_name_usage_ID} the record's own ID for an
 accepted name, or, for a synonym (\code{"synonym"}, \code{"ambiguous synonym"}, \code{"misapplied"}), the ID of
-its accepted name. COL's \code{extinct} flag is kept as a logical \code{extinct} column (taxonAlign's
+its accepted name. \code{kingdom} is the kingdom each name belongs to (a synonym, its accepted name's), from
+the COL's classification; \code{\link[=filter_to_country]{filter_to_country()}} uses it to tell apart genera with the same name in
+different kingdoms. COL's \code{extinct} flag is kept as a logical \code{extinct} column (taxonAlign's
 \code{\link[taxonAlign:load_taxonomic_resources]{taxonAlign::load_taxonomic_resources()}} leaves extinct taxa out of a released dataset by default). COL's \code{"provisionally accepted"} names (86,470 in COL26.10) become \code{"accepted"}:
 they're the accepted names of their taxa in the COL, and taxonAlign's \code{\link[taxonAlign:update_taxa]{taxonAlign::update_taxa()}}
 only reports an accepted name for a record labelled \code{"accepted"}. A subgenus (COL writes

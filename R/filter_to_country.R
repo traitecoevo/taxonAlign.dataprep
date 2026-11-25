@@ -25,7 +25,10 @@ taxonAlign_country_filter_default_taxon <- c(WCVP = "Tracheophyta")
 #' records under that name. The genera (and subgenera) of the kept taxa are kept, with every synonym
 #' of them. A genus name can belong to unrelated genera in different kingdoms, so a genus record
 #' with a kept genus's name is kept only if it leads to a kept genus (it's that genus, or one of its
-#' synonyms). Ranks above genus are kept whole, as they don't limit which species can match.
+#' synonyms), and, if `reference` has a `kingdom` column (as [load_CatalogueOfLife()]'s output does),
+#' only if it's in that genus's kingdom. With a `kingdom` column, a name GBIF has records of also
+#' counts only in the kingdom of `gbif_taxon`. Ranks above genus are kept whole, as they don't limit
+#' which species can match.
 #'
 #' GBIF's records include cultivated, captive and introduced occurrences as well as native ones, and,
 #' for animals, fossils. A name known only from fossil specimens (*Diprotodon*, say) is left out by
@@ -92,7 +95,7 @@ filter_to_country <- function(reference,
 
   gbif_names <- fetch_gbif_country_names(country, gbif_taxon, gbif_taxon_rank, gbif_kingdom,
                                          refresh_cache, cache_dir, quiet, exclude_fossils, ...)
-  keep <- country_filter_records(reference, gbif_names$canonical_name, whole_species)
+  keep <- country_filter_records(reference, gbif_names$canonical_name, whole_species, attr(gbif_names, "kingdoms"))
 
   out <- reference[keep, ]
   for (a in setdiff(names(attributes(reference)), c("names", "row.names", "class"))) attr(out, a) <- attr(reference, a)
@@ -132,7 +135,7 @@ country_match_key <- function(x, autonyms = FALSE) {
 
 # Which records of `reference` to keep, given the canonical names GBIF has records of.
 #' @noRd
-country_filter_records <- function(reference, gbif_canonical, whole_species) {
+country_filter_records <- function(reference, gbif_canonical, whole_species, gbif_kingdoms = NULL) {
   rank <- APCalign::standardise_taxon_rank(reference$taxon_rank)
   genus_level <- rank %in% c("genus", "subgenus")
   # a name of no stated rank -- e.g. the Catalogue of Life Extended Release's 2.17 million "unranked"
@@ -143,6 +146,13 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
   above <- !genus_level & !species_level & !unranked
   key <- country_match_key(reference$canonical_name)
   recorded <- key %in% country_match_key(gbif_canonical, autonyms = TRUE)
+  # With a `kingdom` column (load_CatalogueOfLife() gives one), names are matched within a kingdom: a
+  # record counts as recorded only in the kingdom of the GBIF taxon searched (a vertebrate name isn't a
+  # plant's), and genera are told apart by kingdom below. Without one, every record has the same
+  # (missing) kingdom, and genera are matched by name alone.
+  kingdom <- if ("kingdom" %in% names(reference)) reference$kingdom else rep(NA_character_, nrow(reference))
+  if (!is.null(gbif_kingdoms)) recorded <- recorded & (is.na(kingdom) | kingdom %in% gbif_kingdoms)
+  in_kingdom <- function(k, genus) paste(k, genus, sep = "|")
   id <- reference$taxon_ID
   accepted_of <- reference$accepted_name_usage_ID
 
@@ -150,7 +160,8 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
   kept_accepted <- unique(accepted_of[recorded & species_level])
   if (whole_species) {
     # ...and every accepted name sharing a species with one of them
-    binomial <- stringr::word(APCalign::strip_names_extra(key), 1, 2)
+    # (within a kingdom: a binomial can be both a plant's and an animal's)
+    binomial <- in_kingdom(kingdom, stringr::word(APCalign::strip_names_extra(key), 1, 2))
     accepted_rows <- species_level & id == accepted_of
     kept_binomials <- unique(binomial[accepted_rows & id %in% kept_accepted])
     kept_accepted <- union(kept_accepted, id[accepted_rows & binomial %in% kept_binomials])
@@ -158,26 +169,29 @@ country_filter_records <- function(reference, gbif_canonical, whole_species) {
   keep <- species_level & accepted_of %in% kept_accepted
 
   # Genera. Genus names are only unique within a kingdom, and the reference names a kept taxon's genus
-  # by name alone, so a genus is kept in three steps:
+  # by name, so a genus is kept in three steps (each genus name taken with its kingdom, if known):
   # 1. the kept genus names: the genus of every kept species-level record, and every name GBIF has
   #    records of at genus rank;
   # 2. of the genus records with one of those names (and the subgenus records filed under one), only
-  #    those leading to a genus with one of those names -- which drops a homonym in another kingdom: the
-  #    plant genus Diploprion is a synonym of Medicago, the fish genus Diploprion isn't;
+  #    those leading to a genus with one of those names -- which drops a homonym's synonyms, even with
+  #    no kingdom to go on: the plant genus Diploprion is a synonym of Medicago, the fish genus
+  #    Diploprion isn't;
   # 3. every other genus or subgenus record leading to the same taxon as one of those: its synonyms,
   #    whatever their names (and whatever their `genus` column says -- many CoL subgenus synonyms, such
   #    as Notamacropus, have none).
   # Matched by name alone (until 2026-11-24), the plant Medicago and its synonyms were kept in the
   # Catalogue of Life's Australian vertebrates (with them came the false fuzzy match "Kempiella" ->
   # "Kamiella" -> Medicago), and so were non-Australian genera that share a name with one of an
-  # Australian genus's synonyms (the walrus, Odobenus, through the synonym Trichechus). An accepted genus
-  # sharing its name with a kept genus is still kept, as the reference doesn't say its kingdom.
-  kept_genera <- unique(c(reference$genus[keep], reference$canonical_name[recorded & rank == "genus"]))
+  # Australian genus's synonyms (the walrus, Odobenus, through the synonym Trichechus). Without a
+  # `kingdom` column, an accepted genus sharing its name with a kept genus (the plant Banksia, the
+  # insect Himantopus) is kept too; with one, only if it is in the same kingdom.
+  kept_genera <- unique(c(in_kingdom(kingdom, reference$genus)[keep],
+                          in_kingdom(kingdom, reference$canonical_name)[recorded & rank == "genus"]))
   target <- match(accepted_of, id)
   target_genus <- ifelse(rank[target] %in% "genus", reference$canonical_name[target], reference$genus[target])
-  named <- (rank == "genus" & reference$canonical_name %in% kept_genera |
-              rank == "subgenus" & reference$genus %in% kept_genera) &
-    target_genus %in% kept_genera
+  own_genus <- ifelse(rank == "subgenus", reference$genus, reference$canonical_name)
+  named <- genus_level & in_kingdom(kingdom, own_genus) %in% kept_genera &
+    in_kingdom(kingdom[target], target_genus) %in% kept_genera
   keep <- keep | (genus_level & (named | accepted_of %in% unique(accepted_of[named]))) | above
 
   keep <- keep | (unranked & accepted_of %in% unique(accepted_of[recorded & unranked]))
@@ -199,7 +213,7 @@ fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_
   roots <- if (is.null(gbif_taxon)) list(list(key = NULL, label = "all")) else {
     lapply(seq_along(gbif_taxon), function(i) {
       root <- resolve_gbif_taxon(gbif_taxon[i], gbif_taxon_rank[i], gbif_kingdom[i])
-      list(key = root$key, label = as.character(root$key))
+      list(key = root$key, label = as.character(root$key), kingdom = root$kingdom)
     })
   }
   extra <- list(...)
@@ -242,7 +256,11 @@ fetch_gbif_country_names <- function(country, gbif_taxon, gbif_taxon_rank, gbif_
     parsed
   }))
   out <- dplyr::bind_rows(unlist(names, recursive = FALSE))
-  out[!duplicated(out$scientific_name), ]
+  out <- out[!duplicated(out$scientific_name), ]
+  # the kingdom(s) the names were fetched in, if known for every root (NULL for the whole country)
+  kingdoms <- vapply(roots, function(root) root$kingdom %||% NA_character_, character(1))
+  attr(out, "kingdoms") <- if (is.null(gbif_taxon) || anyNA(kingdoms)) NULL else unique(kingdoms)
+  out
 }
 
 # Every name (scientificName facet) of the occurrence records in country `cc` below `key`, with its

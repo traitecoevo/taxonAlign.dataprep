@@ -119,6 +119,37 @@ test_that("every synonym of a kept genus is kept, whatever its name, rank or `ge
   expect_silent(taxonAlign::check_taxonomic_reference(out))
 })
 
+test_that("with a `kingdom` column, genera are told apart by kingdom", {
+  # an animal genus Acacia (accepted, as a homonym can be in the COL), with a synonym and a species of
+  # its own named like a plant one; and the animal genus Banksia, a name GBIF has records of at genus
+  # rank -- searching plants (Tracheophyta), none of the animals is kept
+  ref <- dplyr::bind_rows(
+    country_test_reference() |> dplyr::mutate(kingdom = "Plantae"),
+    tibble::tribble(
+      ~taxon_ID, ~accepted_name_usage_ID, ~canonical_name, ~taxon_rank, ~taxonomic_status, ~genus, ~kingdom,
+      "Z1", "Z1", "Acacia", "genus", "accepted", "Acacia", "Animalia",
+      "Z2", "Z1", "Akakia", "genus", "synonym", "Akakia", "Animalia",
+      "Z3", "Z3", "Acacia dealbata", "species", "accepted", "Acacia", "Animalia",
+      "Z4", "Z4", "Banksia", "genus", "accepted", "Banksia", "Animalia",
+      "B1", "B1", "Banksia", "genus", "accepted", "Banksia", "Plantae"
+    ) |> dplyr::mutate(scientific_name = canonical_name, taxonomic_dataset = "TEST", .after = canonical_name)
+  )
+  local_mock_gbif_names()
+  testthat::local_mocked_bindings(
+    name_backbone = function(...) data.frame(usageKey = "TP", matchType = "EXACT", rank = "PHYLUM", status = "ACCEPTED", kingdom = "Plantae"),
+    .package = "rgbif"
+  )
+  out <- filter_to_country(ref, "AU", gbif_taxon = "Tracheophyta", cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_false(any(c("Z1", "Z2", "Z3", "Z4") %in% out$taxon_ID))
+  expect_true(all(c("G2", "G3", "S5", "S6") %in% out$taxon_ID))
+  expect_silent(taxonAlign::check_taxonomic_reference(out))
+
+  # without the column, the animal Acacia is indistinguishable from the plant one, and kept
+  out2 <- filter_to_country(dplyr::select(ref, -"kingdom"), "AU", gbif_taxon = "Tracheophyta",
+                            cache_dir = withr::local_tempdir(), quiet = TRUE)
+  expect_true(all(c("Z1", "Z2", "Z3") %in% out2$taxon_ID))
+})
+
 test_that("a name of no rank is kept only if GBIF has records of it", {
   # the COL XR holds millions of "unranked" barcode clusters; they used to count as "above genus",
   # kept whole, whatever the country

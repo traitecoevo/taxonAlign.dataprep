@@ -20,6 +20,34 @@ test_that("COL names become taxonAlign records: synonyms lead to their accepted 
   expect_true(all(out$taxonomic_dataset == "CatalogueOfLife"))
   # COL's extinct flag, as a logical
   expect_equal(out$extinct, c(NA, NA, NA, NA, FALSE, NA, TRUE, NA, NA))
+  # every name's kingdom, a synonym's from its accepted name
+  expect_equal(out$kingdom, rep("Animalia", 9))
+})
+
+test_that("a name's kingdom is the kingdom-rank name its parent links lead to", {
+  id <- c("A", "P", "g1", "g2", "s1", "x1", "o1", "c1", "c2")
+  parent <- c(NA, NA, "A", "P", "g2", "g2", NA, "c2", "c1")
+  rank <- c("kingdom", "kingdom", "genus", "genus", "species", "genus", "genus", "genus", "genus")
+  name <- c("Animalia", "Plantae", "Diploprion", "Medicago", "Medicago sativa", "Diploprion", "Orphanus", "Loopa", "Loopb")
+  # x1, a synonym (parent = its accepted name), takes Medicago's kingdom; no kingdom above o1, and a
+  # cycle in the parent links ends rather than looping forever
+  expect_equal(CoL_kingdom(id, parent, rank, name),
+               c("Animalia", "Plantae", "Animalia", "Plantae", "Plantae", "Plantae", NA, NA, NA))
+})
+
+test_that("a reference cached without a `kingdom` column is reshaped again from the download", {
+  cache <- withr::local_tempdir()
+  dir.create(file.path(cache, "CoL", "316595"), recursive = TRUE)
+  saveRDS(list(key = "316595", alias = "COL26.10", issued = "2026-10-14", doi = NA, citation = NA),
+          file.path(cache, "CoL", "316595", "metadata.rds"))
+  tsv <- write_sample_col_tsv()
+  withr::with_dir(dirname(tsv), utils::zip(file.path(cache, "CoL", "316595", "coldp.zip"), "NameUsage.tsv", flags = "-q"))
+  old <- load_CatalogueOfLife(316595, cache_dir = cache, quiet = TRUE)
+  saveRDS(dplyr::select(old, -"kingdom"), file.path(cache, "CoL", "CatalogueOfLife_316595.rds"))
+  expect_message(again <- load_CatalogueOfLife(316595, cache_dir = cache), "no `kingdom` column")
+  expect_equal(again$kingdom, old$kingdom)
+  # and cached with it from then on
+  expect_true("kingdom" %in% names(readRDS(file.path(cache, "CoL", "CatalogueOfLife_316595.rds"))))
 })
 
 test_that("load_CatalogueOfLife reads your own NameUsage.tsv, and the result aligns and updates names", {

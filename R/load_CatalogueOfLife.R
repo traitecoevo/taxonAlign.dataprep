@@ -40,7 +40,9 @@ taxonAlign_CoL_api <- "https://api.checklistbank.org"
 #' Each name becomes one record, read from the release's ColDP `NameUsage.tsv`: `canonical_name` is
 #' the scientific name without authorship, and `accepted_name_usage_ID` the record's own ID for an
 #' accepted name, or, for a synonym (`"synonym"`, `"ambiguous synonym"`, `"misapplied"`), the ID of
-#' its accepted name. COL's `extinct` flag is kept as a logical `extinct` column (taxonAlign's
+#' its accepted name. `kingdom` is the kingdom each name belongs to (a synonym, its accepted name's), from
+#' the COL's classification; [filter_to_country()] uses it to tell apart genera with the same name in
+#' different kingdoms. COL's `extinct` flag is kept as a logical `extinct` column (taxonAlign's
 #' [taxonAlign::load_taxonomic_resources()] leaves extinct taxa out of a released dataset by default). COL's `"provisionally accepted"` names (86,470 in COL26.10) become `"accepted"`:
 #' they're the accepted names of their taxa in the COL, and taxonAlign's [taxonAlign::update_taxa()]
 #' only reports an accepted name for a record labelled `"accepted"`. A subgenus (COL writes
@@ -104,8 +106,14 @@ load_CatalogueOfLife <- function(version = NULL,
   # (its taxonomic_dataset changed from "COL" to "CatalogueOfLife")
   cache_file <- file.path(cache_dir, "CoL", paste0("CatalogueOfLife_", meta$key, ".rds"))
   if (!refresh_cache && file.exists(cache_file)) {
-    if (!quiet) message("Using cached Catalogue of Life reference (", meta$alias, ", key ", meta$key, ").")
-    return(readRDS(cache_file))
+    reference <- readRDS(cache_file)
+    # reshaped before the `kingdom` column was added (2026-11-24): reshaped again from the download, if
+    # it's still there, rather than asking anyone to refresh the cache
+    if ("kingdom" %in% names(reference) || !file.exists(file)) {
+      if (!quiet) message("Using cached Catalogue of Life reference (", meta$alias, ", key ", meta$key, ").")
+      return(reference)
+    }
+    if (!quiet) message("The cached Catalogue of Life reference has no `kingdom` column; reshaping it again from the download.")
   }
 
   if (!quiet) message("Reading and reshaping the Catalogue of Life...")
@@ -216,6 +224,7 @@ reshape_CatalogueOfLife <- function(raw) {
     taxonomic_status = status,
     taxonomic_dataset = "CatalogueOfLife",
     genus = genus,
+    kingdom = CoL_kingdom(raw$ID, raw$parentID, rank, raw$scientificName),
     taxon_ID = raw$ID,
     accepted_name_usage_ID = ifelse(accepted | is.na(raw$parentID), raw$ID, raw$parentID)
   )
@@ -224,6 +233,27 @@ reshape_CatalogueOfLife <- function(raw) {
     out$extinct <- dplyr::case_when(flag %in% c("true", "t", "1") ~ TRUE, flag %in% c("false", "f", "0") ~ FALSE)
   }
   out
+}
+
+# Each name's kingdom: the kingdom-rank name reached by following parentID (a synonym's parentID is
+# its accepted name, an accepted name's its parent taxon); NA for a name with no kingdom above it. Genus
+# names are only unique within a kingdom, and filter_to_country() needs this to tell homonyms apart
+# (the fish genus Diploprion and the plant synonym Diploprion of Medicago, 2026-11-24).
+#' @noRd
+CoL_kingdom <- function(id, parent_id, rank, name) {
+  parent <- match(parent_id, id)
+  kingdom <- ifelse(rank %in% "kingdom", name, NA_character_)
+  current <- ifelse(is.na(kingdom), parent, NA_integer_)
+  # a CoL classification is ~20 levels deep; the cap only guards against a cycle in the parent links
+  for (step in seq_len(100)) {
+    todo <- which(!is.na(current))
+    if (length(todo) == 0) break
+    found <- rank[current[todo]] %in% "kingdom"
+    kingdom[todo[found]] <- name[current[todo[found]]]
+    current[todo[found]] <- NA_integer_
+    current[todo[!found]] <- parent[current[todo[!found]]]
+  }
+  kingdom
 }
 
 # The release `version` names (key, alias, DOI, citation), from ChecklistBank, cached alongside the

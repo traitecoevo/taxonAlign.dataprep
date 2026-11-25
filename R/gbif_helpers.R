@@ -72,5 +72,7 @@ resolve_gbif_taxon <- function(taxon_name, name_rank, name_kingdom) {
     stop("GBIF matched `gbif_taxon` = \"", taxon_name, "\" but returned no key for it.", call. = FALSE)
   }
 
-  list(key = key, rank = tolower(match$rank))
+  # the kingdom it's in, by name (`Animalia`, `Plantae`, ...), as the Catalogue of Life writes it
+  kingdom <- if ("kingdom" %in% names(match) && length(match$kingdom) == 1) as.character(match$kingdom) else NA_character_
+  list(key = key, rank = tolower(match$rank), kingdom = kingdom)
 }
